@@ -67,7 +67,7 @@ def test_moved_and_done_state_survive():
     base = run([course("Maths", 2026, 11, 12), course("Maths", 2026, 11, 19)])
     sid = base[0].sid
     s = run([course("Maths", 2026, 11, 12), course("Maths", 2026, 11, 19)],
-            states={sid: {"done": 1, "moved_date": "2026-11-16", "moved_start": "14:30"}})
+            states={sid: {"status": "done", "moved_date": "2026-11-16", "moved_start": "14:30"}})
     assert s[0].moved and s[0].done
     assert s[0].day == date(2026, 11, 16) and s[0].start.time() == time(14, 30)
 

@@ -15,12 +15,15 @@ const monday = d => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay(
 let view = 'dashboard';
 let weekStart = monday(new Date());
 
+const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
 async function api(path, opts = {}) {
-  const init = { method: opts.method || 'GET', headers: { 'X-Requested-With': 'fetch' } };
+  const init = { method: opts.method || 'GET', headers: { 'X-CSRF-Token': CSRF } };
   if (opts.json) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opts.json); }
   if (opts.form) init.body = opts.form;
   const res = await fetch(path, init);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { location.href = '/'; throw new Error('Session expirée'); }
   if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
   return data;
 }
@@ -47,29 +50,45 @@ function gauge(load) {
 
 function badges(s) {
   return [
+    s.catchup ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">rattrapage</span>' : '',
     s.overdue ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">en retard</span>' : '',
     s.overloaded ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">chevauchement / journée pleine</span>' : '',
     s.moved ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">déplacé</span>' : '',
   ].join(' ');
 }
 
+function statusButtons(s) {
+  const id = esc(s.id);
+  if (s.status === 'pending') {
+    return `<div class="flex gap-1 shrink-0">
+      <button data-status="done" data-sid="${id}" class="px-2 py-1 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700">✓ Fait</button>
+      <button data-status="missed" data-sid="${id}" class="px-2 py-1 text-xs rounded-md border border-red-300 text-red-700 hover:bg-red-50">✗ Non fait</button></div>`;
+  }
+  const done = s.status === 'done';
+  return `<div class="flex items-center gap-2 shrink-0">
+    <span class="text-xs ${done ? 'text-emerald-700' : 'text-red-700'}">${done ? '✓ Fait' : '✗ Non fait · reporté'}</span>
+    <button data-status="pending" data-sid="${id}" class="text-xs text-slate-500 underline">Annuler</button></div>`;
+}
+
 function sessionRow(s, withDay = false) {
   const chap = s.chapters.length ? ` · chap. ${s.chapters[0]}${s.chapters.length > 1 ? '–' + s.chapters.at(-1) : ''}` : '';
-  const part = s.slot_count > 1 ? ` (${s.slot_index + 1}/${s.slot_count})` : '';
-  return `<li class="flex items-start gap-3 p-3 rounded-lg border border-slate-200 bg-white ${s.done ? 'opacity-60' : ''}" style="border-left:5px solid ${esc(s.color)}">
-    <input type="checkbox" ${s.done ? 'checked' : ''} data-done="${esc(s.id)}" class="mt-1 h-5 w-5 accent-slate-900 cursor-pointer" aria-label="Révisé">
-    <div class="flex-1 min-w-0">
-      <p class="font-medium ${s.done ? 'line-through' : ''}">${esc(s.subject)}${part} ${badges(s)}</p>
+  const part = s.catchup ? ' · rattrapage' : (s.slot_count > 1 ? ` (${s.slot_index + 1}/${s.slot_count})` : '');
+  const tone = s.status === 'done' ? 'opacity-60' : s.status === 'missed' ? 'bg-red-50' : 'bg-white';
+  return `<li class="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-slate-200 ${tone}" style="border-left:5px solid ${esc(s.color)}">
+    <div class="flex-1 min-w-[12rem]">
+      <p class="font-medium ${s.status === 'done' ? 'line-through' : ''}">${esc(s.subject)}${part} ${badges(s)}</p>
       <p class="text-xs text-slate-500">${withDay ? fmtShort(s.day) + ' · ' : ''}${hhmm(s.start)}–${hhmm(s.end)} (${fmtDur(s.minutes)})${chap} · prépare le cours du ${fmtShort(s.target.slice(0, 10))}</p>
     </div>
-    <button data-move="${esc(s.id)}" class="text-xs text-slate-500 hover:text-slate-900 underline shrink-0">Déplacer</button>
+    ${statusButtons(s)}
+    ${s.status === 'pending' ? `<button data-move="${esc(s.id)}" class="text-xs text-slate-500 hover:text-slate-900 underline shrink-0">Déplacer</button>` : ''}
   </li>`;
 }
 
 let sessionIndex = {};
 function bindSessionActions(root) {
-  $$('[data-done]', root).forEach(cb => cb.onchange = guard(async () => {
-    await api(`/api/sessions/${cb.dataset.done}`, { method: 'PATCH', json: { done: cb.checked } });
+  $$('[data-status]', root).forEach(b => b.onclick = guard(async () => {
+    const r = await api(`/api/sessions/${b.dataset.sid}`, { method: 'PATCH', json: { status: b.dataset.status } });
+    if (b.dataset.status === 'missed') toast(`Reporté au cycle suivant · retard de la matière : ${r.backlog}`);
     await refresh();
   }));
   $$('[data-move]', root).forEach(b => b.onclick = () => openMove(sessionIndex[b.dataset.move]));
@@ -98,12 +117,17 @@ $('#move-reset').onclick = guard(async () => {
 
 /* ---------------------------------------------------------------- tableau de bord */
 async function loadDashboard() {
-  const [t, w] = await Promise.all([api('/api/today'), api(`/api/week?start=${iso(monday(new Date()))}`)]);
+  const [t, w, subs] = await Promise.all([api('/api/today'), api(`/api/week?start=${iso(monday(new Date()))}`), api('/api/subjects')]);
   $('#today-date').textContent = fmtLong(t.date);
   index(t.todo); index(t.upcoming);
   $('#todo-list').innerHTML = t.todo.length ? t.todo.map(s => sessionRow(s)).join('')
     : '<li class="text-sm text-slate-500 p-3">🎉 Rien à réviser aujourd\'hui. Synchronisez votre emploi du temps si c\'est inattendu.</li>';
   $('#today-gauge').innerHTML = gauge(t.load);
+  const indebted = subs.filter(x => x.backlog > 0);
+  $('#debt-list').innerHTML = indebted.length ? indebted.map(x =>
+    `<li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full" style="background:${esc(x.color)}"></span>${esc(x.name)}
+     <span class="ml-auto font-medium text-red-600">${x.backlog} · ${fmtDur(x.debt_minutes)}</span></li>`).join('')
+    : '<li class="text-slate-400">Aucun retard 🎉</li>';
   $('#upcoming').innerHTML = t.upcoming.length ? t.upcoming.map(s =>
     `<li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full" style="background:${esc(s.color)}"></span>${esc(s.subject)} <span class="text-slate-400 ml-auto">${fmtShort(s.day)}</span></li>`).join('')
     : '<li class="text-slate-400">Aucune</li>';
@@ -155,8 +179,11 @@ async function loadCalendar() {
     });
     w.sessions.filter(s => s.day === k).forEach(s => {
       const top = (mins(s.start) - w.day_start * 60) / 60 * HOUR_PX, h = Math.max(20, s.minutes / 60 * HOUR_PX);
-      ev.push(`<div class="ev rev ${s.done ? 'done' : ''}" draggable="true" data-sid="${esc(s.id)}" style="top:${top}px;height:${h}px;border-color:${esc(s.color)};color:${esc(s.color)}">
-        <label class="flex items-start gap-1"><input type="checkbox" data-done="${esc(s.id)}" ${s.done ? 'checked' : ''}><span><b>✎ ${esc(s.subject)}</b><br>${hhmm(s.start)}–${hhmm(s.end)}${s.overloaded ? ' ⚠️' : ''}</span></label></div>`);
+      const acts = s.status === 'pending'
+        ? `<button class="mini" data-status="done" data-sid="${esc(s.id)}" title="Fait">✓</button> <button class="mini" data-status="missed" data-sid="${esc(s.id)}" title="Non fait">✗</button>`
+        : `<button class="mini" data-status="pending" data-sid="${esc(s.id)}" title="Annuler">↩</button>`;
+      ev.push(`<div class="ev rev ${s.status}" draggable="true" data-sid="${esc(s.id)}" style="top:${top}px;height:${h}px;border-color:${esc(s.color)};color:${esc(s.color)}">
+        <b>${s.catchup ? '↻' : '✎'} ${esc(s.subject)}</b>${s.overloaded ? ' ⚠️' : ''}<br>${hhmm(s.start)}–${hhmm(s.end)} ${acts}</div>`);
     });
     cols += `<div class="week-grid border-l border-slate-200" data-day="${k}" style="height:${hours * HOUR_PX}px;background-image:repeating-linear-gradient(to bottom,#e2e8f0 0,#e2e8f0 1px,transparent 1px,transparent ${HOUR_PX}px)">${ev.join('')}</div>`;
   }
@@ -206,7 +233,10 @@ async function loadAgenda() {
 }
 
 /* ---------------------------------------------------------------- matières */
-function subjectSummary(s) { return `→ ${s.slots} créneau${s.slots > 1 ? 'x' : ''} de ${fmtDur(s.slot_minutes)} (${fmtDur(s.total_minutes)} par cours)`; }
+function subjectSummary(s) {
+  const base = `→ ${s.slots} créneau${s.slots > 1 ? 'x' : ''} de ${fmtDur(s.slot_minutes)} (${fmtDur(s.total_minutes)} par cours)`;
+  return s.backlog ? `${base} + ${s.backlog} rattrapage${s.backlog > 1 ? 's' : ''} (${fmtDur(s.debt_minutes)} de dette)` : base;
+}
 async function loadSubjects() {
   const list = await api('/api/subjects');
   const num = (name, label, v, min, max, step) => `<label class="text-xs text-slate-600">${label}
@@ -222,6 +252,7 @@ async function loadSubjects() {
       ${num('intensity', 'Intensité (×)', s.intensity, 0.25, 5, 0.25)}
       ${num('chapters', 'Chapitres à revoir', s.chapters, 1, 60, 1)}
       ${num('chapters_per_session', 'Chapitres / session', s.chapters_per_session, 1, 30, 1)}
+      ${num('backlog', 'Cours en retard (dette)', s.backlog, 0, 99, 1)}
     </div>
     <p class="text-sm font-medium mt-3 summary">${subjectSummary(s)}</p></div>`).join('')
     : '<p class="text-slate-500">Aucune matière : synchronisez d\'abord votre emploi du temps.</p>';
@@ -265,6 +296,12 @@ $('#block-form').onsubmit = guard(async e => {
   e.preventDefault();
   await api('/api/blocks', { method: 'POST', json: Object.fromEntries(new FormData(e.target)) });
   e.target.reset(); toast('Blocage ajouté'); await loadSync();
+});
+
+$('#pwd-form').onsubmit = guard(async e => {
+  e.preventDefault();
+  await api('/api/password', { method: 'POST', json: Object.fromEntries(new FormData(e.target)) });
+  e.target.reset(); toast('Mot de passe modifié');
 });
 
 /* ---------------------------------------------------------------- navigation */

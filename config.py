@@ -43,7 +43,6 @@ class Config:
         DB_PATH = BASE_DIR / DB_PATH
 
     # Calendrier
-    ICS_URL = os.getenv("ICS_URL", "").strip()
     TIMEZONE = os.getenv("TIMEZONE", "Europe/Paris")
     AUTO_REFRESH_MINUTES = _int("AUTO_REFRESH_MINUTES", 60)
     SYNC_PAST_DAYS = _int("SYNC_PAST_DAYS", 30)
@@ -58,6 +57,15 @@ class Config:
     PREFERRED_START = _time("PREFERRED_START", "18:00")
     DAILY_CAPACITY_MINUTES = _int("DAILY_CAPACITY_MINUTES", 180)
     HISTORY_DAYS = _int("HISTORY_DAYS", 7)
+    EXTRA_CAP_PER_CYCLE = _int("EXTRA_CAP_PER_CYCLE", 2)  # rattrapages max ajoutés par cycle
 
     # Sécurité
     ALLOW_PRIVATE_ICS_HOSTS = _bool("ALLOW_PRIVATE_ICS_HOSTS", False)
+    SECRET_KEY = os.getenv("SECRET_KEY", "").strip()      # signe les cookies de session
+    SESSION_COOKIE_SECURE = _bool("SESSION_COOKIE_SECURE", False)  # 1 en ligne (HTTPS)
+    SESSION_DAYS = _int("SESSION_DAYS", 14)
+    TRUST_PROXY = _bool("TRUST_PROXY", False)             # 1 derrière le proxy de l'hébergeur
+    ALLOW_REGISTRATION = _bool("ALLOW_REGISTRATION", True)
+    INVITE_CODE = os.getenv("INVITE_CODE", "").strip()    # si défini : exigé à l'inscription
+    LOGIN_MAX_FAILURES = _int("LOGIN_MAX_FAILURES", 5)    # par identifiant + IP
+    LOGIN_WINDOW_MINUTES = _int("LOGIN_WINDOW_MINUTES", 15)

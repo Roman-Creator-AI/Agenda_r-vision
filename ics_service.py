@@ -83,6 +83,15 @@ def parse_summary(summary: str, description: str = "") -> tuple[str, str]:
                     (m.groupdict().get("kind") or "Cours").strip().upper())
     kind = "Cours"
     subject = summary
+    # Format "Matière - Filière - CM 3 (120) - S8" : la matière est le premier segment.
+    if " - " in summary:
+        head, *rest = [p.strip() for p in summary.split(" - ")]
+        rest_text = " ".join(rest)
+        for label, pattern in KIND_PATTERNS:
+            if re.search(pattern, rest_text, re.IGNORECASE):
+                kind = label
+                break
+        return (head or summary), kind
     for label, pattern in KIND_PATTERNS:
         if re.search(pattern, summary, re.IGNORECASE):
             kind = label

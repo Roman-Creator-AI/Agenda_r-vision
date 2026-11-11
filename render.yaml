@@ -1,0 +1,32 @@
+# Blueprint Render. ATTENTION : SQLite exige un disque persistant, réservé aux offres payantes
+# (« starter » ou plus). Sur l'offre gratuite, le disque est effacé à chaque redémarrage :
+# comptes et données seraient perdus. Voir README.md > Déploiement.
+services:
+  - type: web
+    name: campass-revisions
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --workers 1 --threads 4 --timeout 60 --bind 0.0.0.0:$PORT
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DB_PATH
+        value: /var/data/revisions.db
+      - key: SECRET_KEY
+        generateValue: true          # clé aléatoire générée par Render, conservée entre déploiements
+      - key: SESSION_COOKIE_SECURE
+        value: "1"                   # cookies envoyés uniquement en HTTPS
+      - key: TRUST_PROXY
+        value: "1"                   # lit la vraie IP du client derrière le proxy de Render
+      - key: ALLOW_REGISTRATION
+        value: "1"
+      - key: INVITE_CODE
+        sync: false                  # à saisir dans le tableau de bord : exigé pour créer un compte
+      - key: TIMEZONE
+        value: Europe/Paris

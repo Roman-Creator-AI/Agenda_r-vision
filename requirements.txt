@@ -1,4 +1,5 @@
 Flask>=3.0,<4
+gunicorn>=22.0
 icalendar>=6.0
 recurring-ical-events>=3.3
 requests>=2.31

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf }}">
   <title>Révisions Campass</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -11,6 +12,8 @@
     .ev { position: absolute; left: 2px; right: 2px; border-radius: 6px; padding: 2px 5px; font-size: 11px; line-height: 1.25; overflow: hidden; }
     .rev { border: 2px dashed; background: #fff; cursor: grab; }
     .rev.done { opacity: .45; text-decoration: line-through; }
+    .rev.missed { opacity: .6; background: #fef2f2; border-style: solid; }
+    .rev .mini { font-size: 10px; line-height: 1; padding: 2px 4px; border-radius: 4px; border: 1px solid currentColor; background: #fff; }
     .drop-hover { background: rgba(37,99,235,.06); }
     .nav-btn.active { background: #1e293b; color: #fff; }
   </style>
@@ -30,6 +33,13 @@
       <button data-view="sync" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🔄 Synchronisation</button>
     </nav>
     <div id="sync-status" class="hidden md:block mt-6 text-xs text-slate-500"></div>
+    <div class="mt-4 md:mt-6 pt-4 border-t border-slate-200 text-sm flex md:block items-center gap-3">
+      <p class="text-slate-600 md:mb-2">👤 <b>{{ username }}</b></p>
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button class="text-xs text-slate-500 hover:text-slate-900 underline">Se déconnecter</button>
+      </form>
+    </div>
   </aside>
 
   <main class="flex-1 p-4 md:p-8 max-w-6xl w-full">
@@ -48,6 +58,8 @@
         <div class="bg-white rounded-xl border border-slate-200 p-5">
           <h2 class="font-semibold mb-3">Charge du jour</h2>
           <div id="today-gauge"></div>
+          <h3 class="font-semibold mt-5 mb-2 text-sm">Retard par matière</h3>
+          <ul id="debt-list" class="space-y-1 text-sm mb-1"></ul>
           <h3 class="font-semibold mt-5 mb-2 text-sm">Prochaines révisions</h3>
           <ul id="upcoming" class="space-y-1 text-sm"></ul>
         </div>
@@ -84,7 +96,7 @@
     <!-- Matières -->
     <section id="view-subjects" class="view hidden">
       <h2 class="font-semibold text-lg mb-1">Paramètres de matières</h2>
-      <p class="text-sm text-slate-500 mb-4">Durée d'un créneau × intensité, et nombre de chapitres ÷ chapitres par séance = nombre de créneaux. L'agenda se recalcule à chaque modification.</p>
+      <p class="text-sm text-slate-500 mb-4">Durée d'un créneau × intensité, et nombre de chapitres ÷ chapitres par séance = nombre de créneaux. Le champ « Cours en retard » est alimenté automatiquement par vos « Non fait » et ajoute des créneaux de rattrapage ; vous pouvez aussi l'ajuster à la main. L'agenda se recalcule à chaque modification.</p>
       <div id="subjects-list" class="grid md:grid-cols-2 gap-4"></div>
     </section>
 
@@ -102,6 +114,14 @@
           <label class="text-sm font-medium block mb-2">…ou importer un fichier .ics exporté</label>
           <input id="ics-file" type="file" accept=".ics" class="text-sm">
         </div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-3">Mon compte</h2>
+        <form id="pwd-form" class="grid sm:grid-cols-3 gap-2 text-sm">
+          <input type="password" name="current" placeholder="Mot de passe actuel" autocomplete="current-password" required class="border rounded-lg px-2 py-1.5">
+          <input type="password" name="new" placeholder="Nouveau (10 car. min.)" autocomplete="new-password" minlength="10" required class="border rounded-lg px-2 py-1.5">
+          <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Changer</button>
+        </form>
       </div>
       <div class="bg-white rounded-xl border border-slate-200 p-5">
         <h2 class="font-semibold mb-1">Créneaux bloqués</h2>

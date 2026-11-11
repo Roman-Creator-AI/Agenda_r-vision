@@ -148,3 +148,41 @@ Limites connues :
 
 Le titre est découpé ainsi : « Mathématiques 1 - CS+R - CM - S12 » donne la matière « Mathématiques 1 », type CM.
 Pour un autre format, renseigne `SUMMARY_REGEX` (groupes nommés `subject` et `kind`).
+
+---
+
+## 📱 Version site statique (GitHub Pages) — accessible depuis Safari
+
+Le dossier `docs/` est une version **100 % navigateur** : pas de serveur, pas de compte. Le planning, les
+dettes et les réglages sont calculés et stockés dans le navigateur (`localStorage`).
+
+### Publier
+1. Pousse la branche sur GitHub (et fusionne-la dans `main` quand tu es prêt).
+2. GitHub → **Settings → Pages → Build and deployment** → *Deploy from a branch* → branche `main`, dossier **`/docs`**.
+3. Le site apparaît à `https://<pseudo>.github.io/<nom-du-dépôt>/`.
+
+> ⚠️ Avec un compte gratuit, GitHub Pages exige un dépôt **public**. Ton code sera donc visible, mais jamais tes
+> données (elles ne quittent pas ton appareil). Si tu préfères garder le code privé, crée un second dépôt public
+> contenant uniquement le contenu de `docs/`.
+
+### Utiliser sur iPhone / iPad
+1. Ouvre l'adresse dans Safari.
+2. Bouton Partager → **Sur l'écran d'accueil** : l'app s'ouvre en plein écran.
+3. Onglet « Import & sauvegarde » → importe ton fichier `.ics` exporté depuis Campass/Geode.
+
+### Limites à connaître
+- **Données locales** : elles ne se synchronisent pas entre appareils. Utilise *Exporter / Restaurer* (.json).
+  Safari efface les données d'un site non ouvert pendant 7 jours, sauf s'il est ajouté à l'écran d'accueil :
+  exporte régulièrement une sauvegarde.
+- **Lien d'abonnement** : le serveur de l'école peut refuser la lecture depuis un autre site (CORS). Dans ce cas,
+  utilise l'import de fichier `.ics` (aucun proxy tiers n'est utilisé, pour ne pas leur confier ton agenda).
+- **Déplacer un créneau** : glisser-déposer sur ordinateur, bouton ⇄ sur écran tactile.
+
+### Développement
+```bash
+cd tools && npm install && npm run build:css   # recompile docs/css/tailwind.css après modification de l'UI
+npm run vendor                                  # met à jour ical.js dans docs/vendor
+cd .. && node --test "tests-js/*.test.mjs"      # compare planificateur/lecteur ICS JS aux versions Python
+python3 -m http.server -d docs 8000             # aperçu local
+```
+La version Flask (comptes, SQLite) reste disponible dans les autres branches / dossiers.

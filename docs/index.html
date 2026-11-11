@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e293b">
+  <meta name="robots" content="noindex">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Révisions">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Révisions Campass</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="stylesheet" href="css/tailwind.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+<div class="flex flex-col md:flex-row min-h-screen">
+
+  <!-- Barre latérale -->
+  <aside class="md:w-60 bg-white border-b md:border-b-0 md:border-r border-slate-200 p-4 md:sticky md:top-0 md:h-screen shrink-0">
+    <h1 class="text-lg font-bold mb-1">📚 Révisions</h1>
+    <p class="text-xs text-slate-500 mb-4">Planning J-1 depuis Campass</p>
+    <nav class="flex md:flex-col gap-1 overflow-x-auto text-sm">
+      <button data-view="dashboard" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🏠 Tableau de bord</button>
+      <button data-view="calendar" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🗓️ Calendrier</button>
+      <button data-view="agenda" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">📋 Agenda de révision</button>
+      <button data-view="subjects" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">⚙️ Matières</button>
+      <button data-view="sync" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🔄 Import &amp; sauvegarde</button>
+    </nav>
+    <div id="sync-status" class="hidden md:block mt-6 text-xs text-slate-500"></div>
+  </aside>
+
+  <main class="flex-1 p-4 md:p-8 max-w-6xl w-full">
+    <div id="toast" class="fixed top-4 right-4 z-50 hidden px-4 py-2 rounded-lg text-sm text-white shadow-lg"></div>
+
+    <!-- Tableau de bord -->
+    <section id="view-dashboard" class="view space-y-6">
+      <div class="grid md:grid-cols-3 gap-4">
+        <div class="md:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="font-semibold">À réviser aujourd'hui</h2>
+            <span id="today-date" class="text-xs text-slate-500"></span>
+          </div>
+          <ul id="todo-list" class="space-y-2"></ul>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <h2 class="font-semibold mb-3">Charge du jour</h2>
+          <div id="today-gauge"></div>
+          <h3 class="font-semibold mt-5 mb-2 text-sm">Retard par matière</h3>
+          <ul id="debt-list" class="space-y-1 text-sm mb-1"></ul>
+          <h3 class="font-semibold mt-5 mb-2 text-sm">Prochaines révisions</h3>
+          <ul id="upcoming" class="space-y-1 text-sm"></ul>
+        </div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold">Cette semaine</h2>
+          <button data-view="calendar" class="text-sm text-blue-600 hover:underline">Ouvrir le calendrier →</button>
+        </div>
+        <div id="mini-week"></div>
+      </div>
+    </section>
+
+    <!-- Calendrier hebdomadaire -->
+    <section id="view-calendar" class="view hidden">
+      <div class="flex flex-wrap items-center gap-2 mb-4">
+        <button id="prev-week" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100">←</button>
+        <button id="this-week" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100 text-sm">Aujourd'hui</button>
+        <button id="next-week" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100">→</button>
+        <h2 id="week-title" class="font-semibold ml-2"></h2>
+        <p class="text-xs text-slate-500 ml-auto">Glisse un créneau en pointillés (ordinateur) ou touche ⇄ pour le déplacer.</p>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+        <div id="calendar" class="min-w-[760px]"></div>
+      </div>
+    </section>
+
+    <!-- Agenda de révision -->
+    <section id="view-agenda" class="view hidden">
+      <h2 class="font-semibold text-lg mb-4">Agenda de révision</h2>
+      <div id="agenda-list" class="space-y-4"></div>
+    </section>
+
+    <!-- Matières -->
+    <section id="view-subjects" class="view hidden">
+      <h2 class="font-semibold text-lg mb-1">Paramètres de matières</h2>
+      <p class="text-sm text-slate-500 mb-4">Durée d'un créneau × intensité, et nombre de chapitres ÷ chapitres par séance = nombre de créneaux. Le champ « Cours en retard » est alimenté automatiquement par vos « Non fait » et ajoute des créneaux de rattrapage ; vous pouvez aussi l'ajuster à la main. L'agenda se recalcule à chaque modification.</p>
+      <div id="subjects-list" class="grid md:grid-cols-2 gap-4"></div>
+    </section>
+
+    <!-- Import & sauvegarde -->
+    <section id="view-sync" class="view hidden space-y-6 max-w-2xl">
+      <div id="storage-warning" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"></div>
+      <div id="install-hint" class="hidden rounded-xl border border-sky-300 bg-sky-50 p-4 text-sm text-sky-900">
+        📲 <b>Garde tes données sur iPhone / iPad :</b> appuie sur le bouton Partager de Safari puis
+        « Sur l'écran d'accueil ». Safari efface les données d'un site non ouvert depuis 7 jours, mais pas
+        celles d'une app ajoutée à l'écran d'accueil.
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-1">Importer mon emploi du temps</h2>
+        <p id="sync-detail" class="text-sm text-slate-500 mb-4"></p>
+        <label class="text-sm font-medium block mb-2" for="ics-file">Fichier .ics exporté (recommandé)</label>
+        <input id="ics-file" type="file" accept=".ics,text/calendar" class="text-sm mb-4">
+        <details class="pt-3 border-t">
+          <summary class="text-sm font-medium cursor-pointer">Ou utiliser un lien d'abonnement</summary>
+          <p class="text-xs text-slate-500 my-2">Certains serveurs (dont peut-être celui de ton école) interdisent la lecture
+            d'un lien depuis un autre site : dans ce cas le navigateur affiche une erreur, et le fichier .ics reste la solution.
+            Le lien est gardé uniquement dans cet appareil.</p>
+          <input id="ics-url" type="url" placeholder="https://… ou webcal://…" class="w-full border rounded-lg px-3 py-2 text-sm mb-3">
+          <button id="btn-sync" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">Synchroniser maintenant</button>
+        </details>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-1">Sauvegarde</h2>
+        <p class="text-sm text-slate-500 mb-3">Tes données restent dans ce navigateur, sur cet appareil. Exporte-les pour les
+          garder en lieu sûr ou les retrouver sur un autre appareil.</p>
+        <div class="flex flex-wrap gap-2 items-center text-sm">
+          <button id="btn-export" class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Exporter (.json)</button>
+          <label class="px-3 py-1.5 border rounded-lg cursor-pointer hover:bg-slate-50">Restaurer…
+            <input id="import-file" type="file" accept=".json,application/json" class="hidden"></label>
+          <button id="btn-reset" class="px-3 py-1.5 text-red-700 hover:underline ml-auto">Effacer mes données</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-1">Créneaux bloqués</h2>
+        <p class="text-sm text-slate-500 mb-3">Le planificateur évite ces plages (sport, job, rendez-vous…).</p>
+        <form id="block-form" class="flex flex-wrap gap-2 items-end mb-3 text-sm">
+          <input type="date" name="day" required class="border rounded-lg px-2 py-1.5">
+          <input type="time" name="start" required class="border rounded-lg px-2 py-1.5">
+          <input type="time" name="end" required class="border rounded-lg px-2 py-1.5">
+          <input type="text" name="label" placeholder="Libellé" maxlength="80" class="border rounded-lg px-2 py-1.5">
+          <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Ajouter</button>
+        </form>
+        <ul id="blocks-list" class="text-sm space-y-1"></ul>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Fenêtre de déplacement -->
+<dialog id="move-dialog" class="rounded-xl p-5 w-80 backdrop:bg-black/30">
+  <form method="dialog" id="move-form" class="space-y-3 text-sm">
+    <h3 class="font-semibold" id="move-title">Déplacer le créneau</h3>
+    <input type="date" id="move-day" required class="w-full border rounded-lg px-2 py-1.5">
+    <input type="time" id="move-start" required class="w-full border rounded-lg px-2 py-1.5">
+    <div class="flex gap-2 justify-end pt-1">
+      <button type="button" id="move-reset" class="px-3 py-1.5 text-slate-600 hover:underline">Replanifier auto</button>
+      <button type="button" id="move-cancel" class="px-3 py-1.5 border rounded-lg">Annuler</button>
+      <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Valider</button>
+    </div>
+  </form>
+</dialog>
+
+<noscript><p style="padding:1rem">Cette application a besoin de JavaScript.</p></noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

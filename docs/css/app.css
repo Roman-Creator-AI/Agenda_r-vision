@@ -1,0 +1,17 @@
+/* Styles propres à l'application (le reste vient de tailwind.css, généré par tools/). */
+.week-grid { position: relative; }
+.hour-line { border-top: 1px solid #e2e8f0; }
+.ev { position: absolute; left: 2px; right: 2px; border-radius: 6px; padding: 2px 5px; font-size: 11px; line-height: 1.25; overflow: hidden; }
+.rev { border: 2px dashed; background: #fff; cursor: grab; }
+.rev.done { opacity: .45; text-decoration: line-through; }
+.rev.missed { opacity: .6; background: #fef2f2; border-style: solid; }
+.rev .mini { font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 4px; border: 1px solid currentColor; background: #fff; }
+.drop-hover { background: rgba(37, 99, 235, .06); }
+.nav-btn.active { background: #1e293b; color: #fff; }
+
+/* Safari / iPhone : zones sûres (encoche, barre d'accueil), pas de zoom au double appui, sélection douce */
+body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right);
+       padding-bottom: env(safe-area-inset-bottom); -webkit-text-size-adjust: 100%; }
+button, .mini, a, summary, label { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+input, select, textarea { font-size: 16px; }   /* évite le zoom automatique de Safari au focus */
+@media (min-width: 768px) { input, select, textarea { font-size: 14px; } }

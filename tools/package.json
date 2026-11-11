@@ -1,0 +1,13 @@
+{
+  "name": "campass-revisions-tools",
+  "private": true,
+  "description": "Outils de build du site statique (docs/) : compilation du CSS Tailwind et copie de ical.js",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i input.css -o ../docs/css/tailwind.css --minify",
+    "vendor": "cp node_modules/ical.js/dist/ical.min.js ../docs/vendor/ical.min.js && cp node_modules/ical.js/LICENSE ../docs/vendor/ICAL-LICENSE.txt"
+  },
+  "devDependencies": {
+    "ical.js": "2.1.0",
+    "tailwindcss": "3.4.17"
+  }
+}

@@ -91,6 +91,61 @@
       <div id="subjects-list" class="grid md:grid-cols-2 gap-4"></div>
     </section>
 
+    <!-- Page d'une matière : ses cours -->
+    <section id="view-subject" class="view hidden max-w-3xl">
+      <button data-view="subjects" class="text-sm text-slate-500 hover:underline mb-3">← Matières</button>
+      <div class="flex items-center gap-3 mb-1">
+        <span id="subj-dot" class="w-4 h-4 rounded-full shrink-0"></span>
+        <h2 id="subj-title" class="font-semibold text-xl truncate"></h2>
+      </div>
+      <p class="text-sm text-slate-500 mb-4">Téléverse ici tes vrais cours (PDF, Word, texte). Ouvre-en un pour le lire avec l'assistant, qui te résume les grands points et répond à tes questions.</p>
+      <div id="lib-warning" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 mb-4">⚠️ Le stockage de fichiers de ce navigateur est indisponible (navigation privée ?) : tes cours seront perdus à la fermeture de la page.</div>
+      <label id="dropzone" class="dropzone" for="doc-file">
+        <span class="text-2xl" aria-hidden="true">📂</span>
+        <span id="drop-label" class="font-medium">Ajouter des cours</span>
+        <span class="text-xs text-slate-500">Glisse tes fichiers ici ou touche pour les choisir · PDF, .docx, .txt, .md · 25 Mo max chacun</span>
+        <input id="doc-file" type="file" multiple class="hidden">
+      </label>
+      <ul id="docs-list" class="space-y-2 mt-4"></ul>
+    </section>
+
+    <!-- Lecture d'un cours + assistant -->
+    <section id="view-doc" class="view hidden">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <button id="doc-back" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100 text-sm">← <span id="doc-back-label">Retour</span></button>
+        <div class="min-w-0 basis-full order-last sm:basis-0 sm:order-none sm:flex-1">
+          <h2 id="doc-title" class="font-semibold truncate"></h2>
+          <p id="doc-sub" class="text-xs text-slate-500"></p>
+        </div>
+        <button id="doc-original" class="ml-auto sm:ml-0 px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100 text-sm">📄 Original</button>
+      </div>
+      <div class="doc-layout">
+        <article class="reader"><div id="doc-text" class="reader-text"></div></article>
+        <aside class="assistant" aria-label="Assistant d'étude">
+          <header class="assistant-head">
+            <span aria-hidden="true">✨</span><h3 class="font-semibold">Assistant</h3>
+            <span id="ai-model" class="text-[11px] text-slate-400 truncate"></span>
+            <button id="ai-settings" class="ml-auto text-lg leading-none px-1" title="Réglages de l'assistant" aria-label="Réglages de l'assistant">⚙️</button>
+          </header>
+          <div id="ai-scroll" class="assistant-body">
+            <section class="summary-card">
+              <div class="flex items-center gap-2 mb-2">
+                <h4 class="font-semibold text-sm">Les grands points</h4>
+                <button id="ai-resum" class="ml-auto text-xs text-slate-500 underline hidden">Régénérer</button>
+              </div>
+              <div id="ai-summary" class="ai-md"></div>
+            </section>
+            <div id="ai-chat" class="flex flex-col gap-3"></div>
+          </div>
+          <div id="ai-suggest" class="px-3 pb-2 flex flex-wrap gap-1.5"></div>
+          <form id="ai-form" class="assistant-form">
+            <textarea id="ai-input" rows="1" maxlength="2000" placeholder="Pose une question sur ce cours…" class="flex-1 border rounded-xl px-3 py-2 resize-none"></textarea>
+            <button id="ai-send" class="px-3 py-2 bg-slate-900 text-white rounded-xl text-sm">Envoyer</button>
+          </form>
+        </aside>
+      </div>
+    </section>
+
     <!-- Import & sauvegarde -->
     <section id="view-sync" class="view hidden space-y-6 max-w-2xl">
       <div id="storage-warning" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"></div>
@@ -118,7 +173,8 @@
       <div class="bg-white rounded-xl border border-slate-200 p-5">
         <h2 class="font-semibold mb-1">Sauvegarde</h2>
         <p class="text-sm text-slate-500 mb-3">Tes données restent dans ce navigateur, sur cet appareil. Exporte-les pour les
-          garder en lieu sûr ou les retrouver sur un autre appareil.</p>
+          garder en lieu sûr ou les retrouver sur un autre appareil. Les fichiers de cours et la clé de l'assistant IA
+          n'en font pas partie : ils restent uniquement sur cet appareil.</p>
         <div class="flex flex-wrap gap-2 items-center text-sm">
           <button id="btn-export" class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Exporter (.json)</button>
           <label class="px-3 py-1.5 border rounded-lg cursor-pointer hover:bg-slate-50">Restaurer…
@@ -202,6 +258,27 @@
       <button type="button" id="move-reset" class="px-3 py-1.5 text-slate-600 hover:underline">Replanifier auto</button>
       <button type="button" id="move-cancel" class="px-3 py-1.5 border rounded-lg">Annuler</button>
       <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Valider</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Réglages de l'assistant -->
+<dialog id="ai-dialog" class="rounded-xl p-5 w-[26rem] max-w-[calc(100vw-2rem)] backdrop:bg-black/30">
+  <form method="dialog" id="ai-config-form" class="space-y-3 text-sm">
+    <h3 class="font-semibold">Réglages de l'assistant</h3>
+    <p class="text-xs text-slate-500">L'assistant utilise ta propre clé API. Elle est gardée uniquement sur cet appareil et envoyée directement au service choisi,
+      avec le texte du cours que tu consultes. Ne la saisis pas sur un appareil partagé.</p>
+    <label class="block text-xs text-slate-600">Service
+      <select id="ai-provider" class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5"></select></label>
+    <label class="block text-xs text-slate-600">Clé API
+      <input id="ai-key" type="password" autocomplete="off" spellcheck="false" class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5"></label>
+    <p class="text-xs"><a id="ai-help" href="#" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">Obtenir une clé</a></p>
+    <label class="block text-xs text-slate-600">Modèle
+      <input id="ai-model-input" type="text" autocomplete="off" spellcheck="false" class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5"></label>
+    <div class="flex gap-2 justify-end pt-1">
+      <button type="button" id="ai-clear" class="px-3 py-1.5 text-red-700 hover:underline mr-auto">Supprimer la clé</button>
+      <button type="button" id="ai-cancel" class="px-3 py-1.5 border rounded-lg">Annuler</button>
+      <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Enregistrer</button>
     </div>
   </form>
 </dialog>

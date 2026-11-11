@@ -1,6 +1,10 @@
 /* Interface Révisions Campass — JS vanilla. Données et calculs dans le navigateur (voir backend.js). */
 import { createBackend } from './backend.js';
 import { Store } from './store.js';
+import { openLibrary, fold } from './library.js';
+import { extractText, kindOf, ACCEPT } from './extract.js';
+import * as AI from './ai.js';
+import { mdToHtml } from './md.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -16,10 +20,12 @@ const fmtDur = m => m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? pad(m % 60) : ''
 const monday = d => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
 
 let view = 'dashboard';
+let param = null;                     // paramètre de la vue : nom de matière ou id de cours
 let weekStart = monday(new Date());
 
 const store = new Store();
 const backend = await createBackend({ store, cfg: { autoRefreshMinutes: 60 } });
+const library = await openLibrary();
 const api = (path, opts = {}) => backend.handle(opts.method || 'GET', path, opts.json);
 
 function toast(msg, ok = true) {
@@ -241,13 +247,13 @@ function subjectSummary(s) {
   return s.backlog ? `${base} + ${s.backlog} rattrapage${s.backlog > 1 ? 's' : ''} (${fmtDur(s.debt_minutes)} de dette)` : base;
 }
 async function loadSubjects() {
-  const list = await api('/api/subjects');
+  const [list, counts] = await Promise.all([api('/api/subjects'), library.counts()]);
   const num = (name, label, v, min, max, step) => `<label class="text-xs text-slate-600">${label}
     <input type="number" data-f="${name}" value="${v}" min="${min}" max="${max}" step="${step}" class="w-full border rounded-lg px-2 py-1 text-sm mt-0.5"></label>`;
   $('#subjects-list').innerHTML = list.length ? list.map(s => `<div class="bg-white rounded-xl border border-slate-200 p-4" data-name="${esc(s.name)}">
     <div class="flex items-center gap-2 mb-3">
       <input type="color" data-f="color" value="${esc(s.color)}" class="w-7 h-7 rounded cursor-pointer border-0 p-0">
-      <h3 class="font-medium flex-1 truncate">${esc(s.name)}</h3>
+      <h3 class="font-medium flex-1 truncate"><button data-open="${esc(s.name)}" class="hover:underline text-left max-w-full truncate" title="Ouvrir les cours de cette matière">${esc(s.name)}</button></h3>
       <label class="text-xs flex items-center gap-1"><input type="checkbox" data-f="enabled" ${s.enabled ? 'checked' : ''}> actif</label>
     </div>
     <div class="grid grid-cols-2 gap-3">
@@ -257,8 +263,10 @@ async function loadSubjects() {
       ${num('chapters_per_session', 'Chapitres / session', s.chapters_per_session, 1, 30, 1)}
       ${num('backlog', 'Cours en retard (dette)', s.backlog, 0, 99, 1)}
     </div>
-    <p class="text-sm font-medium mt-3 summary">${subjectSummary(s)}</p></div>`).join('')
+    <p class="text-sm font-medium mt-3 summary">${subjectSummary(s)}</p>
+    <button data-open="${esc(s.name)}" class="mt-3 w-full text-sm border rounded-lg py-1.5 hover:bg-slate-50">📂 Mes cours${counts[fold(s.name)] ? ` (${counts[fold(s.name)]})` : ' — ajouter'}</button></div>`).join('')
     : '<p class="text-slate-500">Aucune matière : importez d\'abord votre emploi du temps.</p>';
+  $$('#subjects-list [data-open]').forEach(b => b.onclick = () => show('subject', b.dataset.open));
   $$('#subjects-list [data-f]').forEach(inp => {
     inp.onchange = guard(async () => {
       const card = inp.closest('[data-name]');
@@ -354,8 +362,9 @@ $('#import-file').onchange = guard(async e => {
   toast('Sauvegarde restaurée'); await refresh();
 });
 $('#btn-reset').onclick = guard(async () => {
-  if (!confirm('Effacer toutes les données de cet appareil ? Pense à exporter une sauvegarde avant.')) return;
+  if (!confirm('Effacer toutes les données de cet appareil (planning, cours téléversés, clé de l\'assistant) ? Pense à exporter une sauvegarde avant.')) return;
   await api('/api/reset', { method: 'POST' });
+  await library.clear(); AI.clearSettings();
   toast('Données effacées'); await refresh();
 });
 $('#rblock-form').onsubmit = guard(async e => {
@@ -382,21 +391,233 @@ $('#block-form').onsubmit = guard(async e => {
   e.target.reset(); toast('Blocage ajouté'); await loadSync();
 });
 
+/* ---------------------------------------------------------------- cours d'une matière */
+const KIND_ICON = { pdf: '📕', docx: '📘', text: '📝' };
+const fmtSize = b => b >= 1048576 ? `${(b / 1048576).toFixed(1)} Mo` : `${Math.max(1, Math.round(b / 1024))} Ko`;
+let currentSubject = null;
+
+async function loadSubject(name) {
+  const subs = await api('/api/subjects');
+  const s = subs.find(x => fold(x.name) === fold(name));
+  if (!s) return show('subjects');
+  currentSubject = s;
+  $('#subj-dot').style.background = s.color;
+  $('#subj-title').textContent = s.name;
+  $('#lib-warning').classList.toggle('hidden', library.persistent);
+  const docs = await library.list(s.name);
+  $('#docs-list').innerHTML = docs.length ? docs.map(d => `<li class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400" style="border-left:5px solid ${esc(s.color)}">
+      <button data-doc="${d.id}" class="flex-1 min-w-0 text-left">
+        <p class="font-medium truncate">${KIND_ICON[d.kind] || '📄'} ${esc(d.name)} ${d.has_summary ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 align-middle">✨ résumé</span>' : ''}</p>
+        <p class="text-xs text-slate-500">${fmtSize(d.size)} · ajouté le ${new Date(d.added).toLocaleDateString('fr-FR')}${d.messages ? ` · ${d.messages} message${d.messages > 1 ? 's' : ''}` : ''}</p>
+      </button>
+      <button data-rm="${d.id}" data-name="${esc(d.name)}" class="text-xs text-red-600 hover:underline shrink-0">Supprimer</button></li>`).join('')
+    : '<li class="text-sm text-slate-400 p-2">Aucun cours pour le moment. Ajoute ton premier fichier ci-dessus.</li>';
+  $$('#docs-list [data-doc]').forEach(b => b.onclick = () => show('doc', b.dataset.doc));
+  $$('#docs-list [data-rm]').forEach(b => b.onclick = guard(async () => {
+    if (!confirm(`Supprimer « ${b.dataset.name} » de cet appareil ?`)) return;
+    await library.remove(b.dataset.rm); toast('Cours supprimé'); await loadSubject(name);
+  }));
+}
+
+async function uploadFiles(files) {
+  if (!currentSubject) return;
+  const zone = $('#dropzone'), label = $('#drop-label'), errors = [];
+  let added = 0;
+  zone.classList.add('busy');
+  try {
+    for (const f of files) {
+      label.textContent = `Lecture de ${f.name}…`;
+      try {
+        const { kind, text } = await extractText(f);
+        await library.add({ subject: currentSubject.name, name: f.name, kind, size: f.size, text, blob: f });
+        added++;
+      } catch (e) { errors.push(`${f.name} : ${e.message}`); }
+    }
+  } finally { zone.classList.remove('busy'); label.textContent = 'Ajouter des cours'; }
+  if (added) toast(`${added} cours ajouté${added > 1 ? 's' : ''}${errors.length ? ` · ${errors.length} refusé${errors.length > 1 ? 's' : ''}` : ''}`);
+  if (errors.length) toast(errors.join('\n'), false);
+  await loadSubject(currentSubject.name);
+}
+$('#doc-file').accept = ACCEPT;
+$('#doc-file').onchange = guard(async e => { const f = [...e.target.files]; e.target.value = ''; await uploadFiles(f); });
+{
+  const z = $('#dropzone');
+  ['dragenter', 'dragover'].forEach(t => z.addEventListener(t, e => { e.preventDefault(); z.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => z.addEventListener(t, e => { e.preventDefault(); z.classList.remove('over'); }));
+  z.addEventListener('drop', guard(async e => { await uploadFiles([...e.dataTransfer.files]); }));
+}
+
+/* ---------------------------------------------------------------- lecture d'un cours + assistant */
+let doc = null, aiBusy = false, docToken = 0;
+let aiSettings = AI.loadSettings();
+
+function renderReader(text) {
+  const parts = text.split(/\n*\[Page (\d+)\]\n/);                 // [avant, n°, texte, n°, texte…]
+  const para = t => t.split(/\n{2,}/).filter(x => x.trim()).map(x => `<p>${esc(x.trim())}</p>`).join('');
+  let html = parts[0].trim() ? para(parts[0]) : '';
+  for (let i = 1; i < parts.length; i += 2) html += `<div class="page-mark">Page ${esc(parts[i])}</div>${para(parts[i + 1] || '')}`;
+  $('#doc-text').innerHTML = html;
+}
+
+const scrollChat = () => { const b = $('#ai-scroll'); b.scrollTop = b.scrollHeight; };
+function renderChat() {
+  $('#ai-chat').innerHTML = doc.chat.map(m => m.role === 'user'
+    ? `<div class="bubble bubble-user">${esc(m.content)}</div>` : `<div class="bubble bubble-ai ai-md">${mdToHtml(m.content)}</div>`).join('');
+  $('#ai-suggest').innerHTML = doc.chat.length ? '' : AI.SUGGESTIONS.map(q => `<button type="button" class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('');
+  $$('#ai-suggest [data-q]').forEach(b => b.onclick = () => sendQuestion(b.dataset.q));
+}
+const typing = on => {
+  $('#ai-chat').querySelector('.typing-row')?.remove();
+  if (on) $('#ai-chat').insertAdjacentHTML('beforeend', '<div class="bubble bubble-ai typing-row"><span class="typing"><span></span><span></span><span></span></span></div>');
+  scrollChat();
+};
+const errBubble = msg => { $('#ai-chat').insertAdjacentHTML('beforeend', `<div class="bubble bubble-err" role="alert">${esc(msg)}</div>`); scrollChat(); };
+const aiConfig = () => AI.activeConfig(aiSettings);
+const aiContext = () => AI.systemPrompt({ subject: doc.subject_name, title: doc.name, text: doc.text });
+
+function renderSummary(state, msg = '') {
+  const el = $('#ai-summary'), btn = $('#ai-resum');
+  btn.classList.toggle('hidden', !(doc && doc.summary) || aiBusy);
+  if (state === 'ready') el.innerHTML = mdToHtml(doc.summary);
+  else if (state === 'loading') el.innerHTML = '<span class="typing"><span></span><span></span><span></span></span> <span class="text-slate-500">Lecture du cours…</span>';
+  else if (state === 'nokey') el.innerHTML = `<p class="text-slate-600">Ajoute ta clé API pour obtenir un résumé du cours et poser tes questions.</p>
+      <button type="button" data-config class="mt-2 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-sm">Configurer l'assistant</button>`;
+  else el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><button type="button" data-retry class="mt-2 px-3 py-1.5 border rounded-lg text-sm">Réessayer</button>`;
+  $('[data-config]', el)?.addEventListener('click', openAiSettings);
+  $('[data-retry]', el)?.addEventListener('click', () => summarize());
+}
+
+async function summarize() {
+  const cfg = aiConfig(), token = docToken;
+  if (!cfg.key) return renderSummary('nokey');
+  aiBusy = true; renderSummary('loading');
+  try {
+    const text = await AI.ask(cfg, { system: aiContext(), messages: [{ role: 'user', content: AI.SUMMARY_REQUEST }] });
+    if (token !== docToken) return;
+    doc.summary = text;
+    await library.update(doc.id, { summary: text });
+    aiBusy = false; renderSummary('ready');
+  } catch (e) {
+    if (token !== docToken) return;
+    aiBusy = false; renderSummary('error', e.message);
+    if (e.code === 'auth') openAiSettings();
+  } finally { if (token === docToken) aiBusy = false; }
+}
+$('#ai-resum').onclick = () => { if (!aiBusy) summarize(); };
+
+async function sendQuestion(text) {
+  text = String(text || '').trim();
+  if (!text || aiBusy || !doc) return;
+  const cfg = aiConfig(), token = docToken;
+  if (!cfg.key) return openAiSettings();
+  aiBusy = true; $('#ai-send').disabled = true;
+  doc.chat.push({ role: 'user', content: text });
+  renderChat(); typing(true);
+  try {
+    const answer = await AI.ask(cfg, { system: aiContext(), messages: doc.chat });
+    if (token !== docToken) return;
+    doc.chat.push({ role: 'assistant', content: answer });
+    doc.chat = doc.chat.slice(-60);
+    await library.update(doc.id, { chat: doc.chat });
+    $('#ai-input').value = ''; autosize();
+    renderChat();
+  } catch (e) {
+    if (token !== docToken) return;
+    doc.chat.pop();                                        // la question n'a pas abouti : on pourra la renvoyer telle quelle
+    renderChat(); $('#ai-input').value = text; autosize(); errBubble(e.message);
+    if (e.code === 'auth' || e.code === 'nokey') openAiSettings();
+  } finally {
+    if (token === docToken) { aiBusy = false; $('#ai-send').disabled = false; typing(false); renderSummary(doc.summary ? 'ready' : 'nokey'); scrollChat(); }
+  }
+}
+const autosize = () => { const t = $('#ai-input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; };
+$('#ai-input').oninput = autosize;
+$('#ai-input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendQuestion(e.target.value); } };
+$('#ai-form').onsubmit = e => { e.preventDefault(); sendQuestion($('#ai-input').value); };
+
+async function loadDoc(id) {
+  const d = await library.get(id);
+  if (!d) { toast('Cours introuvable', false); return show('subjects'); }
+  docToken++; doc = d; aiBusy = false; $('#ai-send').disabled = false;
+  aiSettings = AI.loadSettings();
+  $('#doc-title').textContent = d.name;
+  $('#doc-sub').textContent = `${d.subject_name} · ${fmtSize(d.size)} · ${d.text.length.toLocaleString('fr-FR')} caractères`;
+  $('#doc-back-label').textContent = d.subject_name;
+  $('#doc-original').classList.toggle('hidden', !d.blob);
+  $('#ai-model').textContent = aiConfig().key ? aiConfig().model : '';
+  renderReader(d.text); renderChat();
+  window.scrollTo({ top: 0 });
+  if (d.summary) renderSummary('ready'); else summarize();
+}
+$('#doc-back').onclick = () => show('subject', doc ? doc.subject_name : '');
+$('#doc-original').onclick = () => {
+  if (!doc || !doc.blob) return;
+  const url = URL.createObjectURL(doc.blob);
+  if (doc.kind === 'pdf') window.open(url, '_blank', 'noopener');
+  else { const a = Object.assign(document.createElement('a'), { href: url, download: doc.name }); document.body.appendChild(a); a.click(); a.remove(); }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+
+/* ---- réglages de l'assistant */
+function fillAiForm() {
+  const prov = $('#ai-provider').value;
+  $('#ai-key').value = aiSettings.keys[prov] || '';
+  $('#ai-model-input').value = aiSettings.models[prov] || '';
+  $('#ai-model-input').placeholder = AI.PROVIDERS[prov].model;
+  $('#ai-help').href = AI.PROVIDERS[prov].help;
+}
+function openAiSettings() {
+  aiSettings = AI.loadSettings();
+  $('#ai-provider').innerHTML = Object.entries(AI.PROVIDERS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
+  $('#ai-provider').value = aiSettings.provider;
+  fillAiForm();
+  if (!$('#ai-dialog').open) $('#ai-dialog').showModal();
+}
+$('#ai-provider').onchange = fillAiForm;
+$('#ai-settings').onclick = openAiSettings;
+$('#ai-cancel').onclick = () => $('#ai-dialog').close();
+$('#ai-clear').onclick = () => {
+  const prov = $('#ai-provider').value;
+  aiSettings.keys[prov] = ''; AI.saveSettings(aiSettings); $('#ai-key').value = '';
+  toast('Clé supprimée de cet appareil');
+};
+$('#ai-config-form').onsubmit = () => {
+  const prov = $('#ai-provider').value;
+  aiSettings.provider = prov;
+  aiSettings.keys[prov] = $('#ai-key').value.trim();
+  aiSettings.models[prov] = $('#ai-model-input').value.trim();
+  if (!AI.saveSettings(aiSettings)) toast('Impossible d\'enregistrer les réglages dans ce navigateur.', false);
+  else toast('Assistant configuré');
+  if (view === 'doc' && doc) {
+    $('#ai-model').textContent = aiConfig().key ? aiConfig().model : '';
+    if (!doc.summary && !aiBusy) summarize();
+  }
+};
+
 /* ---------------------------------------------------------------- navigation */
 async function refreshStatus() {
   const s = await api('/api/settings');
   $('#sync-status').textContent = s.last_sync ? `Sync : ${new Date(s.last_sync).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}` : 'Pas encore synchronisé';
 }
-const loaders = { dashboard: loadDashboard, calendar: loadCalendar, agenda: loadAgenda, subjects: loadSubjects, sync: loadSync };
-const refresh = guard(async () => { await loaders[view](); refreshStatus(); });
-function show(v) {
+const loaders = { dashboard: loadDashboard, calendar: loadCalendar, agenda: loadAgenda, subjects: loadSubjects, sync: loadSync,
+                  subject: loadSubject, doc: loadDoc };
+const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « enfants » : on garde « Matières » allumé
+const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
+function show(v, p = null) {
   view = loaders[v] ? v : 'dashboard';
+  param = (view === 'subject' || view === 'doc') && p != null && p !== '' ? String(p) : null;
+  if ((view === 'subject' || view === 'doc') && param === null) view = 'subjects';
   $$('.view').forEach(el => el.classList.toggle('hidden', el.id !== `view-${view}`));
-  $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-  history.replaceState(null, '', `#${view}`);
+  $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === (NAV_OF[view] || view)));
+  $('main').classList.toggle('max-w-6xl', view !== 'doc');          // le lecteur utilise toute la largeur
+  history.replaceState(null, '', `#${view}${param !== null ? '/' + encodeURIComponent(param) : ''}`);
   refresh();
 }
 $$('[data-view]').forEach(b => b.onclick = () => show(b.dataset.view));
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 await backend.autoSync();            // rafraîchit en silence si un lien est enregistré et ancien
-show(location.hash.slice(1) || 'dashboard');
+{
+  const [v, ...rest] = location.hash.slice(1).split('/');
+  let p = null; try { p = decodeURIComponent(rest.join('/')); } catch { /* hash invalide */ }
+  show(v || 'dashboard', p);
+}

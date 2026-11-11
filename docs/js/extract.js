@@ -17,6 +17,12 @@ export function cleanText(t) {
     .replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** PDF issus de LaTeX : l'accent est extrait seul, avant sa lettre (« al´ eatoires » → « aléatoires »). */
+const ACCENTS = { '´': '\u0301', '`': '\u0300', 'ˆ': '\u0302', '¨': '\u0308', '˜': '\u0303', '¸': '\u0327' };
+export function fixAccents(t) {
+  return String(t ?? '').replace(/([´`ˆ¨˜¸]) ?(\p{L})/gu, (m, acc, letter) => (letter + ACCENTS[acc]).normalize('NFC'));
+}
+
 let pdfjs = null;
 async function loadPdf() {
   if (!pdfjs) {
@@ -65,7 +71,7 @@ export async function extractText(file) {
   if (file.size > MAX_FILE_BYTES) throw new Error('Fichier trop volumineux (25 Mo maximum).');
   let raw;
   if (kind === 'text') raw = await file.text();
-  else if (kind === 'pdf') raw = await pdfText(await file.arrayBuffer());
+  else if (kind === 'pdf') raw = fixAccents(await pdfText(await file.arrayBuffer()));
   else {
     const mammoth = await loadMammoth();
     try { raw = (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value; }

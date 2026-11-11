@@ -2,7 +2,7 @@
 // La clé API reste dans le localStorage de cet appareil (jamais dans la sauvegarde exportée).
 export const PROVIDERS = {
   anthropic: { label: 'Claude (Anthropic)', model: 'claude-haiku-5-5', help: 'https://console.anthropic.com/settings/keys' },
-  gemini: { label: 'Gemini (Google)', model: 'gemini-2.5-flash', help: 'https://aistudio.google.com/apikey' },
+  gemini: { label: 'Gemini (Google)', model: 'gemini-3.8-flash', help: 'https://aistudio.google.com/apikey' },
 };
 export const AI_KEY = 'campass-revisions-ai';
 export const MAX_CONTEXT_CHARS = 200000;      // ~50 000 mots : tient dans les deux services

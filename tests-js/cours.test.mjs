@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openLibrary, fold } from '../docs/js/library.js';
-import { kindOf, cleanText } from '../docs/js/extract.js';
+import { kindOf, cleanText, fixAccents } from '../docs/js/extract.js';
 import * as AI from '../docs/js/ai.js';
 import { mdToHtml } from '../docs/js/md.js';
 
@@ -51,10 +51,10 @@ test('requête Claude : clé en en-tête, cache du cours, historique plafonné',
 });
 
 test('requête Gemini : rôles « model », clé en en-tête et non dans l\'URL', () => {
-  const { url, init } = AI.buildRequest('gemini', { key: 'g-key', model: 'gemini-2.5-flash', system: 'SYS',
+  const { url, init } = AI.buildRequest('gemini', { key: 'g-key', model: 'gemini-3.8-flash', system: 'SYS',
     messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'r' }] });
   const body = JSON.parse(init.body);
-  assert.match(url, /models\/gemini-2\.5-flash:generateContent$/);
+  assert.match(url, /models\/gemini-3\.8-flash:generateContent$/);
   assert.ok(!url.includes('g-key')); assert.equal(init.headers['x-goog-api-key'], 'g-key');
   assert.deepEqual(body.contents.map(c => c.role), ['user', 'model']);
   assert.equal(body.systemInstruction.parts[0].text, 'SYS');
@@ -87,7 +87,7 @@ test('réglages de l\'assistant : sauvegarde locale, service actif, modèle par 
   const st = storage();
   assert.deepEqual(AI.activeConfig(AI.loadSettings(st)), { provider: 'anthropic', key: '', model: 'claude-haiku-5-5' });
   const s = AI.loadSettings(st); s.provider = 'gemini'; s.keys.gemini = ' g '; AI.saveSettings(s, st);
-  assert.deepEqual(AI.activeConfig(AI.loadSettings(st)), { provider: 'gemini', key: 'g', model: 'gemini-2.5-flash' });
+  assert.deepEqual(AI.activeConfig(AI.loadSettings(st)), { provider: 'gemini', key: 'g', model: 'gemini-3.8-flash' });
   st.setItem(AI.AI_KEY, '{cassé');
   assert.equal(AI.loadSettings(st).provider, 'anthropic');
   AI.clearSettings(st); assert.equal(st.getItem(AI.AI_KEY), null);
@@ -98,4 +98,11 @@ test('Markdown : mise en forme sans jamais laisser passer de HTML', () => {
     '<h4>Titre</h4><ul><li><strong>a</strong></li><li><em>b</em></li></ul><ol><li>un</li><li>deux</li></ol><p>fin <code>x</code></p>');
   const evil = mdToHtml('<img src=x onerror=alert(1)> **<b>**\n- <script>x</script>');
   assert.ok(!/<(img|script|b)\b/.test(evil), evil);
+});
+
+test('PDF LaTeX : accents extraits séparément recollés à leur lettre', () => {
+  assert.equal(fixAccents('Ind´ ependance de variables al´ eatoires'), 'Indépendance de variables aléatoires');
+  assert.equal(fixAccents('Fonctions caract´ eristiques, Probabilit´ es, ing´ enieur'), 'Fonctions caractéristiques, Probabilités, ingénieur');
+  assert.equal(fixAccents('pr` es, Th¨ eme, fa¸ cade'), 'près, Thème, façade'.replace('Thème', 'Thëme'));
+  assert.equal(fixAccents('Texte normal déjà accentué'), 'Texte normal déjà accentué');
 });

@@ -48,6 +48,7 @@ function badges(s) {
     s.overdue ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">en retard</span>' : '',
     s.overloaded ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">chevauchement / journée pleine</span>' : '',
     s.moved ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">déplacé</span>' : '',
+    s.custom_minutes ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">durée perso</span>' : '',
   ].join(' ');
 }
 
@@ -74,7 +75,7 @@ function sessionRow(s, withDay = false) {
       <p class="text-xs text-slate-500">${withDay ? fmtShort(s.day) + ' · ' : ''}${hhmm(s.start)}–${hhmm(s.end)} (${fmtDur(s.minutes)})${chap} · prépare le cours du ${fmtShort(s.target.slice(0, 10))}</p>
     </div>
     ${statusButtons(s)}
-    ${s.status === 'pending' ? `<button data-move="${esc(s.id)}" class="text-xs text-slate-500 hover:text-slate-900 underline shrink-0">Déplacer</button>` : ''}
+    ${s.status === 'pending' ? `<button data-move="${esc(s.id)}" class="text-xs text-slate-500 hover:text-slate-900 underline shrink-0">Modifier</button>` : ''}
   </li>`;
 }
 
@@ -94,15 +95,23 @@ let moving = null;
 function openMove(s) {
   if (!s) return;
   moving = s;
-  $('#move-title').textContent = `Déplacer « ${s.subject} »`;
+  $('#move-title').textContent = `Modifier « ${s.subject} »`;
   $('#move-day').value = s.day;
   $('#move-start').value = hhmm(s.start);
+  $('#move-minutes').value = s.minutes;
   $('#move-dialog').showModal();
 }
 $('#move-cancel').onclick = () => $('#move-dialog').close();
 $('#move-form').onsubmit = guard(async () => {
-  await api(`/api/sessions/${moving.id}`, { method: 'PATCH', json: { day: $('#move-day').value, start: $('#move-start').value } });
-  toast('Créneau déplacé'); await refresh();
+  const json = { day: $('#move-day').value, start: $('#move-start').value };
+  const minutes = Number($('#move-minutes').value);
+  if (minutes !== moving.minutes) json.minutes = minutes;            // durée propre à ce créneau uniquement
+  await api(`/api/sessions/${moving.id}`, { method: 'PATCH', json });
+  toast('Créneau modifié'); await refresh();
+});
+$('#move-default-minutes').onclick = guard(async () => {
+  await api(`/api/sessions/${moving.id}`, { method: 'PATCH', json: { minutes: null } });
+  $('#move-dialog').close(); toast('Durée de la matière rétablie'); await refresh();
 });
 $('#move-reset').onclick = guard(async () => {
   await api(`/api/sessions/${moving.id}`, { method: 'PATCH', json: { reset: true } });
@@ -169,7 +178,7 @@ async function loadCalendar() {
     w.blocks.filter(b => b.day === k).forEach(b => {
       const top = ((+b.start.slice(0, 2)) * 60 + +b.start.slice(3) - w.day_start * 60) / 60 * HOUR_PX;
       const h = ((+b.end.slice(0, 2)) * 60 + +b.end.slice(3) - (+b.start.slice(0, 2)) * 60 - +b.start.slice(3)) / 60 * HOUR_PX;
-      ev.push(`<div class="ev bg-slate-200 text-slate-600" style="top:${top}px;height:${h}px">⛔ ${esc(b.label || 'Bloqué')}</div>`);
+      ev.push(`<div class="ev bg-slate-200 text-slate-600 ${b.recurring ? 'recurring-block' : ''}" style="top:${top}px;height:${h}px" title="${b.recurring ? 'Blocage hebdomadaire' : 'Blocage'}">${b.recurring ? '🔁' : '⛔'} ${esc(b.label || 'Bloqué')}</div>`);
     });
     w.sessions.filter(s => s.day === k).forEach(s => {
       const top = (mins(s.start) - w.day_start * 60) / 60 * HOUR_PX, h = Math.max(20, s.minutes / 60 * HOUR_PX);
@@ -279,8 +288,33 @@ async function loadSync() {
   const blocks = await api('/api/blocks');
   $('#blocks-list').innerHTML = blocks.length ? blocks.map(b => `<li class="flex items-center gap-2">⛔ ${fmtShort(b.day)} ${esc(b.start)}–${esc(b.end)} ${esc(b.label)}
     <button data-del="${b.id}" class="ml-auto text-red-600 hover:underline text-xs">Supprimer</button></li>`).join('') : '<li class="text-slate-400">Aucun blocage.</li>';
-  $$('[data-del]').forEach(b => b.onclick = guard(async () => { await api(`/api/blocks/${b.dataset.del}`, { method: 'DELETE' }); await loadSync(); }));
+  $$('#blocks-list [data-del]').forEach(b => b.onclick = guard(async () => { await api(`/api/blocks/${b.dataset.del}`, { method: 'DELETE' }); await loadSync(); }));
+
+  const rblocks = await api('/api/recurring-blocks');
+  $('#rblocks-list').innerHTML = rblocks.length ? rblocks.map(b => `<li class="flex items-center gap-2">🔁 ${esc(daysLabel(b.weekdays))} ${esc(b.start)}–${esc(b.end)} ${esc(b.label)}
+    <span class="text-xs text-slate-400">${esc(rangeLabel(b.from, b.until))}</span>
+    <button data-del="${b.id}" class="ml-auto text-red-600 hover:underline text-xs">Supprimer</button></li>`).join('') : '<li class="text-slate-400">Aucun blocage hebdomadaire.</li>';
+  $$('#rblocks-list [data-del]').forEach(b => b.onclick = guard(async () => { await api(`/api/recurring-blocks/${b.dataset.del}`, { method: 'DELETE' }); await loadSync(); }));
+
+  const courses = await api('/api/custom-courses');
+  $('#courses-list').innerHTML = courses.length ? courses.map(c => `<li class="flex items-center gap-2">📘 <b>${esc(c.subject)}</b> ${esc(c.kind)} ${esc(c.start)}–${esc(c.end)}
+    <span class="text-xs text-slate-500">${esc(courseFreq(c))}</span>
+    <button data-del="${c.id}" class="ml-auto text-red-600 hover:underline text-xs">Supprimer</button></li>`).join('') : '<li class="text-slate-400">Aucun cours ajouté.</li>';
+  $$('#courses-list [data-del]').forEach(b => b.onclick = guard(async () => { await api(`/api/custom-courses/${b.dataset.del}`, { method: 'DELETE' }); await loadSync(); }));
 }
+
+const DAY_NAMES = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+const daysLabel = wd => wd.length === 7 ? 'tous les jours' : 'chaque ' + wd.map(d => DAY_NAMES[d]).join(', ');
+const shortDate = d => parseDay(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+const rangeLabel = (from, until) => from && until ? `du ${shortDate(from)} au ${shortDate(until)}` : from ? `depuis le ${shortDate(from)}`
+  : until ? `jusqu'au ${shortDate(until)}` : 'toute la période';
+const courseFreq = c => c.frequency === 'once' ? `le ${shortDate(c.from)} (une fois)`
+  : `${c.every === 1 ? 'chaque semaine' : `toutes les ${c.every} semaines`} · ${c.weekdays.map(d => DAY_NAMES[d].slice(0, 3)).join(', ')} · ${rangeLabel(c.from, c.until)}`;
+const formBody = form => {
+  const fd = new FormData(form), out = Object.fromEntries(fd);
+  out.weekdays = fd.getAll('weekdays');
+  return out;
+};
 
 const MAX_FILE = 6 * 1024 * 1024;
 async function readFile(file) {
@@ -323,6 +357,24 @@ $('#btn-reset').onclick = guard(async () => {
   if (!confirm('Effacer toutes les données de cet appareil ? Pense à exporter une sauvegarde avant.')) return;
   await api('/api/reset', { method: 'POST' });
   toast('Données effacées'); await refresh();
+});
+$('#rblock-form').onsubmit = guard(async e => {
+  e.preventDefault();
+  await api('/api/recurring-blocks', { method: 'POST', json: formBody(e.target) });
+  e.target.reset(); toast('Blocage hebdomadaire ajouté'); await loadSync();
+});
+const syncCourseForm = () => {
+  const once = $('#course-freq').value === 'once';
+  ['#course-every-wrap', '#course-until-wrap', '#course-days-wrap'].forEach(id => $(id).classList.toggle('hidden', once));
+  $('#course-from-label').textContent = once ? 'Date' : 'À partir du';
+};
+$('#course-freq').onchange = syncCourseForm;
+syncCourseForm();
+$('#course-form').onsubmit = guard(async e => {
+  e.preventDefault();
+  const r = await api('/api/custom-courses', { method: 'POST', json: formBody(e.target) });
+  e.target.reset(); syncCourseForm();
+  toast(`Cours ajouté (${r.occurrences} séance${r.occurrences > 1 ? 's' : ''})`); await loadSync();
 });
 $('#block-form').onsubmit = guard(async e => {
   e.preventDefault();

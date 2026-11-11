@@ -15,3 +15,12 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
 button, .mini, a, summary, label { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 input, select, textarea { font-size: 16px; }   /* évite le zoom automatique de Safari au focus */
 @media (min-width: 768px) { input, select, textarea { font-size: 14px; } }
+
+/* Pastilles de jours de la semaine (blocages et cours récurrents) */
+.daychip { display:inline-flex; align-items:center; padding:.25rem .6rem; border:1px solid #cbd5e1; border-radius:.5rem; cursor:pointer; user-select:none; background:#fff; }
+.daychip:hover { background:#f1f5f9; }
+.daychip:has(.daychip-input:checked) { background:#0f172a; color:#fff; border-color:#0f172a; }
+.daychip:has(.daychip-input:focus-visible) { outline:2px solid #3b82f6; outline-offset:2px; }
+.daychip-input { position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; }
+.daychip { position:relative; }
+.ev.recurring-block { background-image:repeating-linear-gradient(45deg,transparent 0 6px,rgba(100,116,139,.12) 6px 12px); }

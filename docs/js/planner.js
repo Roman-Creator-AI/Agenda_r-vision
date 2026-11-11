@@ -107,7 +107,8 @@ function subjectCfg(subjects, name) {
  * Génère les créneaux de révision.
  * `courses`  : [{subject, kind, start:'YYYY-MM-DDTHH:MM', end, room}]
  * `subjects` : {nom: {name, color, sessionMinutes, chapters, chaptersPerSession, intensity, enabled, backlog}}
- * `states`   : {sid: {status, moved_date, moved_start, catchup, subject, target_day, idx}}
+ * `states`   : {sid: {status, moved_date, moved_start, minutes?, catchup, subject, target_day, idx}}
+ *              (`minutes` : durée imposée à ce créneau, à la place de celle de la matière)
  * `blocks`   : [{day, start:'HH:MM', end:'HH:MM'}]
  */
 export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, today) {
@@ -131,10 +132,14 @@ export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, to
   }
 
   const wanted = [];
-  const make = (scfg, nxt, day, idx, minutes, slots, catchup, chapters = []) => {
+  const make = (scfg, nxt, day, idx, defaultMinutes, slots, catchup, chapters = []) => {
+    const sid = makeSid(nxt.subject, nxt.day, idx, catchup);
+    // Durée choisie à la main pour CE créneau (states[sid].minutes) : elle prime sur celle de la matière.
+    const custom = Number(states[sid] && states[sid].minutes);
+    const minutes = Number.isFinite(custom) && custom > 0 ? custom : defaultMinutes;
     const origin = dayToMs(day) + cfg.dayStart * MIN;
     return {
-      sid: makeSid(nxt.subject, nxt.day, idx, catchup), subject: scfg.name, targetMs: nxt.startMs,
+      sid, subject: scfg.name, targetMs: nxt.startMs,
       day, startMs: origin, endMs: origin + minutes * MIN, minutes, slotIndex: idx, slotCount: slots,
       status: 'pending', done: false, catchup, idx, moved: false, overloaded: false, chapters: [...chapters],
     };

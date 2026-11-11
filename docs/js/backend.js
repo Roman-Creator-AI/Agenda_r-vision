@@ -1,7 +1,7 @@
 // « Backend » exécuté dans le navigateur : mêmes routes et mêmes réponses JSON que l'API Flask
 // (app.py), mais les données vivent dans le localStorage de l'appareil.
 import { DEFAULT_CFG, DEFAULT_SUBJECT, plan, dailyLoad, workload } from './planner.js';
-import { addDays, isDay, todayLocal, weekday, pad2 } from './dates.js';
+import { DAY, addDays, dayToMs, isDay, todayLocal, weekday, pad2 } from './dates.js';
 import { IcsError, fetchICS, parseICS } from './ics.js';
 
 export class ApiError extends Error {
@@ -44,9 +44,54 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     return out;
   }
 
+  // ------------------------------------------------------------ cours ajoutés / blocages hebdomadaires
+  const DEFAULT_WEEKS = 20;          // durée d'une série hebdomadaire sans date de fin
+  const MAX_SPAN_DAYS = 400;         // garde-fou : une série ne dépasse pas ~13 mois
+
+  /** Occurrences d'un blocage hebdomadaire entre deux jours (inclus). */
+  function recurringBlockDays(rb, from, to) {
+    const lo = rb.from && rb.from > from ? rb.from : from;
+    const hi = rb.until && rb.until < to ? rb.until : to;
+    const out = [];
+    if (hi < lo || (dayToMs(hi) - dayToMs(lo)) / DAY > 1500) return out;
+    for (let d = lo; d <= hi; d = addDays(d, 1)) {
+      if (rb.weekdays.includes(weekday(d))) {
+        out.push({ id: rb.id, day: d, start: rb.start, end: rb.end, label: rb.label, recurring: true });
+      }
+    }
+    return out;
+  }
+
+  /** Occurrences (au format des cours importés) d'un cours ajouté à la main. */
+  function customCourseOccurrences(c) {
+    const make = day => ({
+      uid: `custom-${c.id}-${day}`, subject: c.subject, kind: c.kind, start: `${day}T${c.start}`, end: `${day}T${c.end}`,
+      room: c.room, summary: [c.subject, c.kind].filter(Boolean).join(' '), custom: true, cid: c.id,
+    });
+    if (c.frequency === 'once') return [make(c.from)];
+    const until = c.until || addDays(c.from, DEFAULT_WEEKS * 7 - 1);
+    const firstMonday = addDays(c.from, -weekday(c.from));
+    const out = [];
+    for (let d = c.from; d <= until; d = addDays(d, 1)) {
+      if (!c.weekdays.includes(weekday(d))) continue;
+      const weeks = Math.round((dayToMs(addDays(d, -weekday(d))) - dayToMs(firstMonday)) / (7 * DAY));
+      if (weeks % c.every === 0) out.push(make(d));
+    }
+    return out;
+  }
+
+  /** Cours importés (ICS) + cours ajoutés à la main, développés en occurrences. */
+  const allCourses = () => S().courses.concat(...S().custom_courses.map(customCourseOccurrences));
+
   function buildPlan() {
     const subjects = subjectCfgs();
-    const sessions = plan(S().courses, subjects, S().states, S().blocks, CFG, today());
+    const courses = allCourses();
+    // Les blocages hebdomadaires sont développés en jours précis sur la période couverte par les cours.
+    const days = courses.map(c => c.start.slice(0, 10)).sort();
+    const recurring = days.length
+      ? S().recurring_blocks.flatMap(rb => recurringBlockDays(rb, addDays(days[0], -1), addDays(days[days.length - 1], 1)))
+      : [];
+    const sessions = plan(courses, subjects, S().states, S().blocks.concat(recurring), CFG, today());
     return { sessions, subjects };
   }
 
@@ -56,6 +101,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     slot_index: s.slotIndex, slot_count: s.slotCount, chapters: s.chapters,
     status: s.status, done: s.done, catchup: s.catchup, moved: s.moved, overloaded: s.overloaded,
     overdue: s.day < today() && s.status === 'pending',
+    custom_minutes: !!(S().states[s.sid] && S().states[s.sid].minutes),     // durée fixée à la main
   });
 
   const metaOf = s => ({ catchup: s.catchup, subject: s.subject, target_day: s.targetStart.slice(0, 10), idx: s.idx });
@@ -128,6 +174,14 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     return n;
   };
 
+  const parseWeekdays = v => [...new Set((Array.isArray(v) ? v : [v]).filter(x => x !== undefined && x !== '' && x !== null)
+    .map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+  const optionalDay = (v, label) => {
+    if (v === undefined || v === null || v === '') return '';
+    if (!isDay(v)) throw err(400, `Date ${label} invalide.`);
+    return v;
+  };
+
   // ------------------------------------------------------------ routes
   async function handle(method, path, body = {}) {
     body = body || {};
@@ -172,13 +226,15 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       monday = addDays(monday, -weekday(monday));
       const end = addDays(monday, 7);
       const colors = Object.fromEntries(Object.values(S().subjects).map(s => [fold(s.name), s.color]));
-      const courses = S().courses.filter(c => c.start < end && c.end > monday)
+      const courses = allCourses().filter(c => c.start < end && c.end > monday)
         .map(c => ({ ...c, color: colors[fold(c.subject)] || '#64748b' }));
       const { sessions, subjects } = buildPlan();
       const load = dailyLoad(sessions, CFG.capacity);
+      const blocks = S().blocks.filter(b => b.day >= monday && b.day < end)
+        .concat(...S().recurring_blocks.map(rb => recurringBlockDays(rb, monday, addDays(end, -1))));
       return {
         start: monday, courses, sessions: sessions.filter(s => s.day >= monday && s.day < end).map(s => ser(s, subjects)),
-        blocks: S().blocks.filter(b => b.day >= monday && b.day < end).sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start)),
+        blocks: blocks.sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start)),
         load: Object.fromEntries(Object.entries(load).filter(([k]) => k >= monday && k < end)),
         day_start: Math.floor(CFG.dayStart / 60), day_end: Math.floor(CFG.dayEnd / 60) + 1,
       };
@@ -209,6 +265,16 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       if (status !== undefined && status !== null) {
         if (!STATUSES.has(status)) throw err(400, 'Statut invalide.');
         out.backlog = setStatus(s.sid, metaOf(s), status);
+      }
+      if ('minutes' in body) {                 // durée propre à ce créneau (null = revenir à celle de la matière)
+        const st = ensureState(s.sid, metaOf(s));
+        if (body.minutes === null) delete st.minutes;
+        else {
+          let v;
+          try { v = toInt(body.minutes); } catch { throw err(400, 'Durée invalide.'); }
+          if (v < 5 || v > 480) throw err(400, 'La durée doit être comprise entre 5 minutes et 8 h.');
+          st.minutes = v;
+        }
       }
       if (body.reset) {
         const st = ensureState(s.sid, metaOf(s)); st.moved_date = null; st.moved_start = null;
@@ -262,6 +328,67 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     }
     if (method === 'DELETE' && (m = p.match(/^\/api\/blocks\/(\d+)$/))) {
       S().blocks = S().blocks.filter(b => b.id !== Number(m[1])); store.save();
+      return { ok: true };
+    }
+
+    // ---- blocages hebdomadaires (ex : tous les lundis de 17h30 à 19h)
+    if (method === 'GET' && p === '/api/recurring-blocks') {
+      return [...S().recurring_blocks].sort((a, b) => a.weekdays[0] - b.weekdays[0] || a.start.localeCompare(b.start));
+    }
+    if (method === 'POST' && p === '/api/recurring-blocks') {
+      const wd = parseWeekdays(body.weekdays);
+      if (!wd.length) throw err(400, 'Choisis au moins un jour de la semaine.');
+      if (!HHMM.test(String(body.start || '')) || !HHMM.test(String(body.end || '')) || body.end <= body.start) {
+        throw err(400, 'Heures invalides (la fin doit suivre le début).');
+      }
+      const from = optionalDay(body.from, 'de début'), until = optionalDay(body.until, 'de fin');
+      if (from && until && until < from) throw err(400, 'La date de fin précède la date de début.');
+      S().recurring_blocks.push({ id: S().next_item_id++, weekdays: wd, start: body.start, end: body.end,
+                                  label: String(body.label || '').slice(0, 80), from, until });
+      store.save();
+      return { ok: true };
+    }
+    if (method === 'DELETE' && (m = p.match(/^\/api\/recurring-blocks\/(\d+)$/))) {
+      S().recurring_blocks = S().recurring_blocks.filter(b => b.id !== Number(m[1])); store.save();
+      return { ok: true };
+    }
+
+    // ---- cours ajoutés à la main, avec leur fréquence
+    if (method === 'GET' && p === '/api/custom-courses') {
+      return [...S().custom_courses].sort((a, b) => fold(a.subject).localeCompare(fold(b.subject)));
+    }
+    if (method === 'POST' && p === '/api/custom-courses') {
+      const subject = String(body.subject || '').trim().slice(0, 120);
+      if (!subject) throw err(400, 'Donne un nom à ce cours.');
+      if (!HHMM.test(String(body.start || '')) || !HHMM.test(String(body.end || '')) || body.end <= body.start) {
+        throw err(400, 'Heures invalides (la fin doit suivre le début).');
+      }
+      if (!isDay(body.from)) throw err(400, 'Date invalide.');
+      const frequency = body.frequency === 'once' ? 'once' : 'weekly';
+      const course = { id: S().next_item_id, subject, kind: String(body.kind || '').trim().slice(0, 30),
+                       room: String(body.room || '').trim().slice(0, 120), start: body.start, end: body.end,
+                       frequency, weekdays: [], every: 1, from: body.from, until: '' };
+      if (frequency === 'weekly') {
+        course.weekdays = parseWeekdays(body.weekdays);
+        if (!course.weekdays.length) throw err(400, 'Choisis au moins un jour de la semaine.');
+        let every;
+        try { every = body.every === undefined || body.every === '' ? 1 : toInt(body.every); } catch { every = 0; }
+        if (every < 1 || every > 8) throw err(400, 'La fréquence doit être entre 1 et 8 (toutes les N semaines).');
+        course.every = every;
+        course.until = optionalDay(body.until, 'de fin');
+        if (course.until && course.until < course.from) throw err(400, 'La date de fin précède la date de début.');
+        if (course.until && (dayToMs(course.until) - dayToMs(course.from)) / DAY > MAX_SPAN_DAYS) {
+          throw err(400, 'La série est trop longue (13 mois maximum).');
+        }
+      }
+      S().next_item_id++;
+      S().custom_courses.push(course);
+      ensureSubjects([subject]);
+      store.save();
+      return { ok: true, occurrences: customCourseOccurrences(course).length };
+    }
+    if (method === 'DELETE' && (m = p.match(/^\/api\/custom-courses\/(\d+)$/))) {
+      S().custom_courses = S().custom_courses.filter(c => c.id !== Number(m[1])); store.save();
       return { ok: true };
     }
     throw err(404, `Route inconnue : ${method} ${p}`);

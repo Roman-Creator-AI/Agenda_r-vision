@@ -130,6 +130,23 @@
       <div class="bg-white rounded-xl border border-slate-200 p-5">
         <h2 class="font-semibold mb-1">Créneaux bloqués</h2>
         <p class="text-sm text-slate-500 mb-3">Le planificateur évite ces plages (sport, job, rendez-vous…).</p>
+
+        <h3 class="text-sm font-medium mb-2">Bloquer chaque semaine</h3>
+        <p class="text-xs text-slate-500 mb-2">Ex. : tous les lundis de 17h30 à 19h. Laisse les dates vides pour bloquer sur toute la période de l'emploi du temps.</p>
+        <form id="rblock-form" class="space-y-2 mb-4 text-sm">
+          <div class="flex flex-wrap gap-1.5" role="group" aria-label="Jours de la semaine"><label class="daychip"><input type="checkbox" name="weekdays" value="0" class="daychip-input">Lun</label><label class="daychip"><input type="checkbox" name="weekdays" value="1" class="daychip-input">Mar</label><label class="daychip"><input type="checkbox" name="weekdays" value="2" class="daychip-input">Mer</label><label class="daychip"><input type="checkbox" name="weekdays" value="3" class="daychip-input">Jeu</label><label class="daychip"><input type="checkbox" name="weekdays" value="4" class="daychip-input">Ven</label><label class="daychip"><input type="checkbox" name="weekdays" value="5" class="daychip-input">Sam</label><label class="daychip"><input type="checkbox" name="weekdays" value="6" class="daychip-input">Dim</label></div>
+          <div class="flex flex-wrap gap-2 items-end">
+            <label class="text-xs text-slate-600">De<input type="time" name="start" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">À<input type="time" name="end" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">Depuis le (facultatif)<input type="date" name="from" class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">Jusqu'au (facultatif)<input type="date" name="until" class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <input type="text" name="label" placeholder="Libellé" maxlength="80" class="border rounded-lg px-2 py-1.5">
+            <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Ajouter</button>
+          </div>
+        </form>
+        <ul id="rblocks-list" class="text-sm space-y-1 mb-5"></ul>
+
+        <h3 class="text-sm font-medium mb-2 pt-3 border-t">Bloquer un jour précis</h3>
         <form id="block-form" class="flex flex-wrap gap-2 items-end mb-3 text-sm">
           <input type="date" name="day" required class="border rounded-lg px-2 py-1.5">
           <input type="time" name="start" required class="border rounded-lg px-2 py-1.5">
@@ -139,6 +156,34 @@
         </form>
         <ul id="blocks-list" class="text-sm space-y-1"></ul>
       </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-1">Mes cours ajoutés</h2>
+        <p class="text-sm text-slate-500 mb-3">Ajoute un cours absent de ton emploi du temps importé (soutien, option, séance ponctuelle…). Il reçoit ses créneaux de révision comme les autres.</p>
+        <form id="course-form" class="space-y-2 mb-3 text-sm">
+          <div class="flex flex-wrap gap-2 items-end">
+            <label class="text-xs text-slate-600">Nom du cours<input type="text" name="subject" required maxlength="120" class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">Type (CM, TD…)<input type="text" name="kind" maxlength="30" class="block w-24 border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">Salle<input type="text" name="room" maxlength="120" class="block w-28 border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">De<input type="time" name="start" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">À<input type="time" name="end" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+          </div>
+          <div class="flex flex-wrap gap-2 items-end">
+            <label class="text-xs text-slate-600">Fréquence
+              <select name="frequency" id="course-freq" class="block border rounded-lg px-2 py-1.5 text-sm">
+                <option value="weekly">Toutes les semaines</option>
+                <option value="once">Une seule fois</option>
+              </select></label>
+            <label class="text-xs text-slate-600" id="course-every-wrap">Toutes les… semaines
+              <input type="number" name="every" min="1" max="8" value="1" class="block w-20 border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600"><span id="course-from-label">À partir du</span><input type="date" name="from" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600" id="course-until-wrap">Jusqu'au (facultatif)<input type="date" name="until" class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+          </div>
+          <div id="course-days-wrap" class="flex flex-wrap gap-1.5" role="group" aria-label="Jours du cours"><label class="daychip"><input type="checkbox" name="weekdays" value="0" class="daychip-input">Lun</label><label class="daychip"><input type="checkbox" name="weekdays" value="1" class="daychip-input">Mar</label><label class="daychip"><input type="checkbox" name="weekdays" value="2" class="daychip-input">Mer</label><label class="daychip"><input type="checkbox" name="weekdays" value="3" class="daychip-input">Jeu</label><label class="daychip"><input type="checkbox" name="weekdays" value="4" class="daychip-input">Ven</label><label class="daychip"><input type="checkbox" name="weekdays" value="5" class="daychip-input">Sam</label><label class="daychip"><input type="checkbox" name="weekdays" value="6" class="daychip-input">Dim</label></div>
+          <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Ajouter le cours</button>
+        </form>
+        <ul id="courses-list" class="text-sm space-y-1"></ul>
+      </div>
     </section>
   </main>
 </div>
@@ -146,9 +191,13 @@
 <!-- Fenêtre de déplacement -->
 <dialog id="move-dialog" class="rounded-xl p-5 w-80 backdrop:bg-black/30">
   <form method="dialog" id="move-form" class="space-y-3 text-sm">
-    <h3 class="font-semibold" id="move-title">Déplacer le créneau</h3>
+    <h3 class="font-semibold" id="move-title">Modifier le créneau</h3>
     <input type="date" id="move-day" required class="w-full border rounded-lg px-2 py-1.5">
     <input type="time" id="move-start" required class="w-full border rounded-lg px-2 py-1.5">
+    <label class="block text-xs text-slate-600">Durée de ce créneau (minutes)
+      <input type="number" id="move-minutes" min="5" max="480" step="5" required class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5"></label>
+    <p class="text-xs text-slate-500">Ne change que ce créneau ; les autres gardent la durée de la matière.
+      <button type="button" id="move-default-minutes" class="underline">Revenir à la durée de la matière</button></p>
     <div class="flex gap-2 justify-end pt-1">
       <button type="button" id="move-reset" class="px-3 py-1.5 text-slate-600 hover:underline">Replanifier auto</button>
       <button type="button" id="move-cancel" class="px-3 py-1.5 border rounded-lg">Annuler</button>

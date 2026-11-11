@@ -8,6 +8,7 @@ export const emptyState = () => ({
   version: VERSION,
   settings: { ics_url: '', last_sync: '', last_sync_count: '', last_error: '' },
   courses: [], subjects: {}, states: {}, blocks: [], next_block_id: 1,
+  recurring_blocks: [], custom_courses: [], next_item_id: 1,   // blocages hebdomadaires, cours ajoutés à la main
 });
 
 const HEX = /^#[0-9a-fA-F]{6}$/, DAYRE = /^\d{4}-\d{2}-\d{2}$/, HM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -43,11 +44,31 @@ export function normalize(raw) {
       catchup: !!v.catchup, subject: str(v.subject, 120), target_day: DAYRE.test(v.target_day) ? v.target_day : '',
       idx: Number.isInteger(v.idx) ? v.idx : 0, debt_delta: [-1, 0, 1].includes(v.debt_delta) ? v.debt_delta : 0,
     };
+    // durée choisie à la main pour ce créneau précis (absente = durée de la matière)
+    if (Number.isFinite(Number(v.minutes)) && v.minutes !== null && v.minutes !== '') {
+      s.states[sid].minutes = Math.round(num(v.minutes, 5, 480, 60));
+    }
   }
   s.blocks = (Array.isArray(raw.blocks) ? raw.blocks : []).slice(0, 5000)
     .filter(b => b && DAYRE.test(b.day) && HM.test(b.start) && HM.test(b.end) && b.end > b.start)
     .map(b => ({ id: Math.round(num(b.id, 1, 1e9, 1)), day: b.day, start: b.start, end: b.end, label: str(b.label, 80) }));
   s.next_block_id = Math.max(Math.round(num(raw.next_block_id, 1, 1e9, 1)), ...s.blocks.map(b => b.id + 1), 1);
+
+  const weekdays = v => [...new Set((Array.isArray(v) ? v : []).map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+  const optDay = v => (DAYRE.test(v) ? v : '');
+  s.recurring_blocks = (Array.isArray(raw.recurring_blocks) ? raw.recurring_blocks : []).slice(0, 500)
+    .filter(b => b && weekdays(b.weekdays).length && HM.test(b.start) && HM.test(b.end) && b.end > b.start)
+    .map(b => ({ id: Math.round(num(b.id, 1, 1e9, 1)), weekdays: weekdays(b.weekdays), start: b.start, end: b.end,
+                 label: str(b.label, 80), from: optDay(b.from), until: optDay(b.until) }));
+  s.custom_courses = (Array.isArray(raw.custom_courses) ? raw.custom_courses : []).slice(0, 200)
+    .filter(c => c && HM.test(c.start) && HM.test(c.end) && c.end > c.start && DAYRE.test(c.from) &&
+                 (c.frequency === 'once' || (c.frequency === 'weekly' && weekdays(c.weekdays).length)))
+    .map(c => ({ id: Math.round(num(c.id, 1, 1e9, 1)), subject: str(c.subject, 120) || 'Sans titre', kind: str(c.kind, 30),
+                 room: str(c.room, 120), start: c.start, end: c.end, frequency: c.frequency,
+                 weekdays: c.frequency === 'weekly' ? weekdays(c.weekdays) : [], every: Math.round(num(c.every, 1, 8, 1)),
+                 from: c.from, until: optDay(c.until) }));
+  s.next_item_id = Math.max(Math.round(num(raw.next_item_id, 1, 1e9, 1)),
+    ...s.recurring_blocks.map(b => b.id + 1), ...s.custom_courses.map(c => c.id + 1), 1);
   return s;
 }
 

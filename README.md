@@ -13,6 +13,9 @@ Chaque utilisateur a son compte et son planning privés.
 - **Dette de révision** : un « Non fait » ajoute 1 au compteur de retard de la matière ; le planificateur crée
   alors des créneaux de rattrapage dans les cycles suivants. Le compteur est modifiable à la main.
 - **Charge** : durée, intensité et nombre de chapitres par matière ; jauge de charge quotidienne.
+- **Blocages hebdomadaires** *(site statique `docs/`)* : « tous les lundis de 17h30 à 19h », avec dates de début / fin facultatives, en plus des blocages d'un jour précis.
+- **Durée par créneau** *(site statique)* : bouton « Modifier » sur un créneau pour fixer sa durée sans toucher aux autres créneaux de la matière.
+- **Cours ajoutés à la main** *(site statique)* : une fois, chaque semaine ou toutes les N semaines, sur les jours de ton choix ; ils reçoivent leurs révisions comme les cours importés.
 
 ### Règles du suivi et de la dette
 

@@ -205,3 +205,101 @@ test('remise à zéro', async () => {
   assert.equal((await call('GET', '/api/subjects')).length, 0);
   assert.ok(!storage._m.has(KEY));
 });
+
+const wd = d => (new Date(d + 'T12:00:00').getDay() + 6) % 7;                    // 0 = lundi
+
+test('blocage hebdomadaire : une règle remplace la saisie jour par jour', async () => {
+  const { call } = await setup();
+  await call('POST', '/api/upload', { text: ics() });
+  const future = (await agenda(call)).filter(x => x.day > TODAY && !x.catchup);
+  const dow = wd(future[0].day);
+  const free = future.filter(x => wd(x.day) === dow);
+  assert.ok(free.length >= 2, 'plusieurs séances le même jour de semaine');
+  await rejects(call('POST', '/api/recurring-blocks', { weekdays: [], start: '08:00', end: '23:00' }), 400);
+  await rejects(call('POST', '/api/recurring-blocks', { weekdays: [dow], start: '19:00', end: '17:30' }), 400);
+  await rejects(call('POST', '/api/recurring-blocks', { weekdays: [dow], start: '17:30', end: '19:00', from: '2026-12-01', until: '2026-11-01' }), 400);
+
+  await call('POST', '/api/recurring-blocks', { weekdays: [dow], start: '17:30', end: '19:00', label: 'Sport' });
+  assert.equal((await call('GET', '/api/recurring-blocks')).length, 1);
+  const w = await call('GET', `/api/week?start=${future[0].day}`);
+  const hit = w.blocks.filter(b => b.recurring && b.day === future[0].day);
+  assert.deepEqual(hit.map(b => [b.start, b.end, b.label]), [['17:30', '19:00', 'Sport']]);
+  for (const s of (await agenda(call)).filter(x => wd(x.day) === dow)) {         // aucun créneau ne chevauche la plage
+    assert.ok(s.overloaded || !(s.start.slice(11) < '19:00' && s.end.slice(11) > '17:30'), s.day);
+  }
+  const [r] = await call('GET', '/api/recurring-blocks');
+  await call('DELETE', `/api/recurring-blocks/${r.id}`);
+  assert.deepEqual(await call('GET', '/api/recurring-blocks'), []);
+});
+
+test('blocage hebdomadaire : dates de début et de fin respectées', async () => {
+  const { call } = await setup();
+  await call('POST', '/api/upload', { text: ics() });
+  const d = (await agenda(call)).find(x => x.day > TODAY).day;
+  await call('POST', '/api/recurring-blocks', { weekdays: [wd(d)], start: '10:00', end: '11:00', from: d, until: d });
+  const week = async day => (await call('GET', `/api/week?start=${day}`)).blocks.filter(b => b.recurring);
+  assert.equal((await week(d)).length, 1);
+  assert.equal((await week(addDays(d, 7))).length, 0);
+});
+
+test('durée d\'un seul créneau : les autres gardent celle de la matière', async () => {
+  const { call } = await setup();
+  await call('POST', '/api/upload', { text: ics() });
+  const [maths] = await call('GET', '/api/subjects');
+  const list = (await agenda(call)).filter(x => x.day > TODAY && !x.catchup);
+  const [a, b] = list;
+  assert.equal(a.minutes, maths.slot_minutes);
+  await call('PATCH', `/api/sessions/${a.id}`, { minutes: 25 });
+  const after = await agenda(call);
+  const a2 = after.find(x => x.id === a.id), b2 = after.find(x => x.id === b.id);
+  assert.equal(a2.minutes, 25); assert.ok(a2.custom_minutes);
+  assert.equal(b2.minutes, maths.slot_minutes); assert.ok(!b2.custom_minutes);
+  await rejects(call('PATCH', `/api/sessions/${a.id}`, { minutes: 3 }), 400);
+  await rejects(call('PATCH', `/api/sessions/${a.id}`, { minutes: 'beaucoup' }), 400);
+  await call('PATCH', `/api/sessions/${a.id}`, { minutes: null });                 // retour à la durée de la matière
+  assert.equal((await agenda(call)).find(x => x.id === a.id).minutes, maths.slot_minutes);
+});
+
+test('cours ajouté à la main : une fois, chaque semaine, une semaine sur deux', async () => {
+  const { call } = await setup();
+  const base = '2026-11-16';                                                      // un lundi
+  await rejects(call('POST', '/api/custom-courses', { subject: '', start: '10:00', end: '12:00', from: base }), 400);
+  await rejects(call('POST', '/api/custom-courses', { subject: 'Anglais', start: '12:00', end: '10:00', from: base }), 400);
+  await rejects(call('POST', '/api/custom-courses', { subject: 'Anglais', start: '10:00', end: '12:00', from: base, frequency: 'weekly', weekdays: [] }), 400);
+  await rejects(call('POST', '/api/custom-courses', { subject: 'Anglais', start: '10:00', end: '12:00', from: base, frequency: 'weekly', weekdays: [0], every: 12 }), 400);
+
+  let r = await call('POST', '/api/custom-courses', { subject: 'Ponctuel', start: '10:00', end: '12:00', from: base, frequency: 'once' });
+  assert.equal(r.occurrences, 1);
+  r = await call('POST', '/api/custom-courses', { subject: 'Anglais', kind: 'TD', start: '14:00', end: '16:00', from: base,
+    until: '2026-12-13', frequency: 'weekly', weekdays: [0, 2], every: 1 });
+  assert.equal(r.occurrences, 8);                                                 // lun + mer pendant 4 semaines
+  r = await call('POST', '/api/custom-courses', { subject: 'Labo', start: '08:00', end: '10:00', from: base,
+    until: '2026-12-13', frequency: 'weekly', weekdays: [1], every: 2 });
+  assert.equal(r.occurrences, 2);                                                 // semaines 1 et 3
+
+  const names = (await call('GET', '/api/subjects')).map(s => s.name);
+  assert.ok(['Ponctuel', 'Anglais', 'Labo'].every(n => names.includes(n)), 'les matières sont créées');
+  const w = await call('GET', `/api/week?start=${base}`);
+  assert.deepEqual(w.courses.map(c => c.subject).sort(), ['Anglais', 'Anglais', 'Labo', 'Ponctuel']);
+  assert.ok(w.courses.every(c => c.color));
+  assert.ok((await agenda(call)).some(s => s.subject === 'Anglais'), 'révisions générées pour le cours ajouté');
+
+  const [first] = await call('GET', '/api/custom-courses');
+  await call('DELETE', `/api/custom-courses/${first.id}`);
+  assert.equal((await call('GET', '/api/custom-courses')).length, 2);
+});
+
+test('blocages hebdomadaires, cours ajoutés et durées survivent à une sauvegarde / restauration', async () => {
+  const a = await setup();
+  await a.call('POST', '/api/upload', { text: ics() });
+  await a.call('POST', '/api/recurring-blocks', { weekdays: [0, 3], start: '17:30', end: '19:00' });
+  await a.call('POST', '/api/custom-courses', { subject: 'Anglais', start: '14:00', end: '16:00', from: '2026-11-16', frequency: 'weekly', weekdays: [0] });
+  const s = (await agenda(a.call)).find(x => x.day > TODAY);
+  await a.call('PATCH', `/api/sessions/${s.id}`, { minutes: 40 });
+  const { text } = await a.call('GET', '/api/export');
+  const b = await setup();
+  await b.call('POST', '/api/import', { text });
+  assert.equal((await b.call('GET', '/api/recurring-blocks')).length, 1);
+  assert.equal((await b.call('GET', '/api/custom-courses')).length, 1);
+  assert.equal((await agenda(b.call)).find(x => x.id === s.id).minutes, 40);
+});

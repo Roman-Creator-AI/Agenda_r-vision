@@ -135,7 +135,7 @@ async function loadDashboard() {
   $('#todo-list').innerHTML = t.todo.length ? t.todo.map(s => sessionRow(s)).join('')
     : '<li class="text-sm text-slate-500 p-3">🎉 Rien à réviser aujourd\'hui. Importez votre emploi du temps si c\'est inattendu.</li>';
   $('#today-gauge').innerHTML = gauge(t.load);
-  const indebted = subs.filter(x => x.backlog > 0);
+  const indebted = subs.filter(x => x.backlog > 0 && x.enabled);
   $('#debt-list').innerHTML = indebted.length ? indebted.map(x =>
     `<li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full" style="background:${esc(x.color)}"></span>${esc(x.name)}
      <span class="ml-auto font-medium text-red-600">${x.backlog} · ${fmtDur(x.debt_minutes)}</span></li>`).join('')
@@ -223,7 +223,7 @@ async function loadCalendar() {
 /** Rappels facultatifs de la semaine affichée, posés dans les trous libres (rien n'est enregistré : recalculé à chaque affichage). */
 async function reminderSlots(w) {
   try {
-    const docs = await library.withSrs();
+    const docs = await library.withSrs(await activeKeep());
     if (!docs.length) return [];
     const colors = Object.fromEntries((await api('/api/subjects')).map(s => [fold(s.name), s.color]));
     const now = new Date();
@@ -279,38 +279,115 @@ function subjectSummary(s) {
   const base = `→ ${s.slots} créneau${s.slots > 1 ? 'x' : ''} de ${fmtDur(s.slot_minutes)} (${fmtDur(s.total_minutes)} par cours)`;
   return s.backlog ? `${base} + ${s.backlog} rattrapage${s.backlog > 1 ? 's' : ''} (${fmtDur(s.debt_minutes)} de dette)` : base;
 }
+let subjFilter = '', subjSort = 'name';
+const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+async function setSubjectEnabled(name, enabled) {
+  await api('/api/subjects', { method: 'PUT', json: { name, enabled } });
+}
+/** Filtre « cours des matières encore révisées » pour les rappels. */
+async function activeKeep() {
+  const act = new Set((await api('/api/subjects')).filter(s => s.enabled).map(s => fold(s.name)));
+  return r => act.has(r.subject);
+}
+
 async function loadSubjects() {
-  const [list, counts] = await Promise.all([api('/api/subjects'), library.counts()]);
+  const [list, counts, srsDocs] = await Promise.all([api('/api/subjects'), library.counts(), library.withSrs()]);
+  const today = todayIso(), dueBy = {};
+  srsDocs.forEach(d => { if (d.srs.due <= today) dueBy[d.subject] = (dueBy[d.subject] || 0) + 1; });
+  const active = list.filter(s => s.enabled), idle = list.filter(s => !s.enabled);
+  const q = fold(subjFilter);
+  const sorters = { name: (a, b) => fold(a.name).localeCompare(fold(b.name)), load: (a, b) => b.total_minutes - a.total_minutes || sorters.name(a, b),
+                    backlog: (a, b) => b.backlog - a.backlog || b.total_minutes - a.total_minutes };
+  const shown = active.filter(s => !q || fold(s.name).includes(q)).sort(sorters[subjSort] || sorters.name);
+
+  const total = active.reduce((n, s) => n + s.total_minutes, 0);
+  $('#subj-summary').textContent = list.length
+    ? `${plural(active.length, 'matière à réviser', 'matières à réviser')}${active.length ? `, soit ${fmtDur(total)} de révisions au total` : ''}${idle.length ? ` · ${plural(idle.length, 'non révisée', 'non révisées')}` : ''}`
+    : '';
+  $('#subj-pick').classList.toggle('hidden', !list.length);
+
   const num = (name, label, v, min, max, step) => `<label class="text-xs text-slate-600">${label}
     <input type="number" data-f="${name}" value="${v}" min="${min}" max="${max}" step="${step}" class="w-full border rounded-lg px-2 py-1 text-sm mt-0.5"></label>`;
-  $('#subjects-list').innerHTML = list.length ? list.map(s => `<div class="bg-white rounded-xl border border-slate-200 p-4" data-name="${esc(s.name)}">
-    <div class="flex items-center gap-2 mb-3">
-      <input type="color" data-f="color" value="${esc(s.color)}" class="w-7 h-7 rounded cursor-pointer border-0 p-0">
-      <h3 class="font-medium flex-1 truncate"><button data-open="${esc(s.name)}" class="hover:underline text-left max-w-full truncate" title="Ouvrir les cours de cette matière">${esc(s.name)}</button></h3>
-      <label class="text-xs flex items-center gap-1"><input type="checkbox" data-f="enabled" ${s.enabled ? 'checked' : ''}> actif</label>
-    </div>
-    <div class="grid grid-cols-2 gap-3">
-      ${num('session_minutes', 'Durée d\'une session (min)', s.session_minutes, 5, 480, 5)}
-      ${num('intensity', 'Intensité (×)', s.intensity, 0.25, 5, 0.25)}
-      ${num('chapters', 'Chapitres à revoir', s.chapters, 1, 60, 1)}
-      ${num('chapters_per_session', 'Chapitres / session', s.chapters_per_session, 1, 30, 1)}
-      ${num('backlog', 'Cours en retard (dette)', s.backlog, 0, 99, 1)}
-    </div>
-    <p class="text-sm font-medium mt-3 summary">${subjectSummary(s)}</p>
-    <button data-open="${esc(s.name)}" class="mt-3 w-full text-sm border rounded-lg py-1.5 hover:bg-slate-50">📂 Mes cours${counts[fold(s.name)] ? ` (${counts[fold(s.name)]})` : ' — ajouter'}</button></div>`).join('')
-    : '<p class="text-slate-500">Aucune matière : importez d\'abord votre emploi du temps.</p>';
-  $$('#subjects-list [data-open]').forEach(b => b.onclick = () => show('subject', b.dataset.open));
+  $('#subjects-list').innerHTML = shown.map(s => {
+    const n = counts[fold(s.name)] || 0, due = dueBy[fold(s.name)] || 0;
+    return `<article class="subj-card" data-name="${esc(s.name)}" style="--c:${esc(s.color)}">
+      <div class="flex items-start gap-3">
+        <input type="color" data-f="color" value="${esc(s.color)}" class="subj-color" aria-label="Couleur de ${esc(s.name)}" title="Changer la couleur">
+        <div class="min-w-0 flex-1">
+          <h3><button type="button" data-open="${esc(s.name)}" class="subj-name" title="Ouvrir les cours de cette matière">${esc(s.name)}</button></h3>
+          <p class="subj-sum summary">${subjectSummary(s)}</p>
+        </div>
+      </div>
+      <div class="subj-chips">
+        <span class="subj-chip">📂 ${n ? plural(n, 'cours', 'cours') : 'aucun cours ajouté'}</span>
+        ${due ? `<span class="subj-chip warn">🔁 ${plural(due, 'rappel', 'rappels')}</span>` : ''}
+        ${s.backlog ? `<span class="subj-chip late">${plural(s.backlog, 'rattrapage', 'rattrapages')}</span>` : ''}
+      </div>
+      <div class="subj-actions">
+        <button type="button" data-open="${esc(s.name)}" class="subj-btn primary">Mes cours</button>
+        <button type="button" data-idle="${esc(s.name)}" class="subj-btn quiet" title="Plus de créneaux ni de rappels pour cette matière">Ne plus réviser</button>
+      </div>
+      <details class="subj-settings"><summary>Réglages du planning</summary>
+        <div class="grid grid-cols-2 gap-3">
+          ${num('session_minutes', 'Durée d\'une session (min)', s.session_minutes, 5, 480, 5)}
+          ${num('intensity', 'Intensité (×)', s.intensity, 0.25, 5, 0.25)}
+          ${num('chapters', 'Chapitres à revoir', s.chapters, 1, 60, 1)}
+          ${num('chapters_per_session', 'Chapitres / session', s.chapters_per_session, 1, 30, 1)}
+          ${num('backlog', 'Cours en retard (dette)', s.backlog, 0, 99, 1)}
+        </div></details></article>`;
+  }).join('');
+  const none = $('#subjects-none');
+  none.classList.toggle('hidden', !!shown.length);
+  none.textContent = !list.length ? 'Aucune matière : importe d\'abord ton emploi du temps.'
+    : !active.length ? 'Aucune matière à réviser pour le moment. Remets-en depuis la section « Non révisées » ci-dessous.'
+    : 'Aucune matière ne correspond à ta recherche.';
+
+  const box = $('#subjects-idle-box');
+  box.classList.toggle('hidden', !idle.length);
+  $('#idle-title').textContent = `Non révisées (${idle.length})`;
+  $('#subjects-idle').innerHTML = idle.map(s => `<li class="idle-row"><span class="dot" style="background:${esc(s.color)}"></span>
+    <button type="button" data-open="${esc(s.name)}" class="font-medium hover:underline truncate text-left" title="Ouvrir les cours de cette matière">${esc(s.name)}</button>
+    <span class="text-xs text-slate-500">${counts[fold(s.name)] ? plural(counts[fold(s.name)], 'cours', 'cours') : ''}</span>
+    <button type="button" data-back="${esc(s.name)}" class="subj-btn ml-auto">Remettre dans mes révisions</button></li>`).join('');
+
+  $$('#view-subjects [data-open]').forEach(b => b.onclick = () => show('subject', b.dataset.open));
+  $$('#subjects-list [data-idle]').forEach(b => b.onclick = guard(async () => {
+    await setSubjectEnabled(b.dataset.idle, false); toast(`« ${b.dataset.idle} » retirée de tes révisions`); await loadSubjects();
+  }));
+  $$('#subjects-idle [data-back]').forEach(b => b.onclick = guard(async () => {
+    await setSubjectEnabled(b.dataset.back, true); toast('Matière remise dans tes révisions'); await loadSubjects();
+  }));
   $$('#subjects-list [data-f]').forEach(inp => {
     inp.onchange = guard(async () => {
       const card = inp.closest('[data-name]');
-      const body = { name: card.dataset.name, [inp.dataset.f]: inp.type === 'checkbox' ? inp.checked : inp.value };
-      await api('/api/subjects', { method: 'PUT', json: body });
+      await api('/api/subjects', { method: 'PUT', json: { name: card.dataset.name, [inp.dataset.f]: inp.value } });
       const fresh = (await api('/api/subjects')).find(x => x.name === card.dataset.name);
       $('.summary', card).textContent = subjectSummary(fresh);
+      if (inp.dataset.f === 'color') card.style.setProperty('--c', inp.value);
       toast('Agenda recalculé');
     });
   });
 }
+$('#subj-search').oninput = e => { subjFilter = e.target.value; loadSubjects(); };
+$('#subj-sort').onchange = e => { subjSort = e.target.value; loadSubjects(); };
+
+/* ---- choisir en une fois les matières à réviser */
+$('#subj-pick').onclick = guard(async () => {
+  const list = await api('/api/subjects');
+  $('#subj-checks').innerHTML = list.map(s => `<li><label class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+    <input type="checkbox" value="${esc(s.name)}" ${s.enabled ? 'checked' : ''} data-was="${s.enabled ? 1 : 0}">
+    <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${esc(s.color)}"></span><span class="truncate">${esc(s.name)}</span></label></li>`).join('');
+  $('#subj-dialog').showModal();
+});
+$('#subj-all').onclick = () => $$('#subj-checks input').forEach(i => { i.checked = true; });
+$('#subj-none').onclick = () => $$('#subj-checks input').forEach(i => { i.checked = false; });
+$('#subj-cancel').onclick = () => $('#subj-dialog').close();
+$('#subj-form').onsubmit = guard(async () => {
+  const changed = $$('#subj-checks input').filter(i => i.checked !== (i.dataset.was === '1'));
+  for (const i of changed) await setSubjectEnabled(i.value, i.checked);
+  if (changed.length) toast(`${plural(changed.length, 'matière modifiée', 'matières modifiées')} : agenda recalculé`);
+  await loadSubjects();
+});
 
 /* ---------------------------------------------------------------- import & sauvegarde */
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -702,13 +779,16 @@ document.addEventListener('keydown', e => {
   else if ((e.key === 'f' || e.key === 'F') && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !$('#ai-dialog').open) { e.preventDefault(); setFull(!full.on); }
 });
 
+let docSubjectActive = true;
 async function loadDoc(id) {
   const d = await library.get(id);
   if (!d) { toast('Cours introuvable', false); return show('subjects'); }
   docToken++; leavePdf(); doc = d; aiBusy = false; $('#ai-send').disabled = false;
   aiSettings = AI.loadSettings();
   const subs = await api('/api/subjects').catch(() => []);
-  const color = subs.find(x => fold(x.name) === fold(d.subject_name))?.color || '#4f46e5';
+  const sub = subs.find(x => fold(x.name) === fold(d.subject_name));
+  const color = sub?.color || '#4f46e5';
+  docSubjectActive = sub ? !!sub.enabled : true;
   const root = $('#view-doc');
   root.style.setProperty('--accent', color); root.style.setProperty('--accent-ink', inkOn(color));
   $('#doc-title').textContent = d.name;
@@ -782,7 +862,7 @@ async function updateSrs(id, fn) {                         // lit, transforme, e
 
 /** Carte « À revoir » du tableau de bord et de l'agenda : facultatif, jamais bloquant. */
 async function renderDueCard(el) {
-  const today = todayIso(), r = await library.reviews(today);
+  const today = todayIso(), r = await library.reviews(today, await activeKeep());
   if (!r.total) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   const colors = Object.fromEntries((await api('/api/subjects')).map(s => [fold(s.name), s.color]));
   let html;
@@ -826,7 +906,8 @@ function renderSrs() {
   const due = SRS.isDue(c, today);
   row.innerHTML = `<span class="srs-pill ${due ? 'due' : ''}">🔁 Rappel ${esc(SRS.dueLabel(c.due, today))}</span>
     <button type="button" id="srs-review" class="tool ${due ? 'tool-primary' : ''}">Réviser maintenant</button>
-    <button type="button" id="srs-stop" class="link-btn">Arrêter les rappels</button>`;
+    <button type="button" id="srs-stop" class="link-btn">Arrêter les rappels</button>
+    ${docSubjectActive ? '' : '<span class="srs-hint">Cette matière n\'est plus dans tes révisions : ses rappels sont masqués.</span>'}`;
   $('#srs-review').onclick = () => { reviewIntent = String(doc.id); showReviewBar(); };
   $('#srs-stop').onclick = guard(async () => {
     if (!confirm('Arrêter les rappels de ce cours ? Son historique de révision sera effacé.')) return;

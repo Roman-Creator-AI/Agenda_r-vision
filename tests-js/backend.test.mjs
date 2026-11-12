@@ -303,3 +303,23 @@ test('blocages hebdomadaires, cours ajoutés et durées survivent à une sauvega
   assert.equal((await b.call('GET', '/api/custom-courses')).length, 1);
   assert.equal((await agenda(b.call)).find(x => x.id === s.id).minutes, 40);
 });
+
+test('matière retirée des révisions : plus de créneaux, restaurés quand on la remet, réglages conservés', async () => {
+  const { call } = await setup();
+  await call('POST', '/api/upload', { text: ics() });
+  const [maths] = await call('GET', '/api/subjects');
+  const before = (await agenda(call)).filter(s => s.subject === maths.name);
+  assert.ok(before.length > 0);
+  await call('PUT', '/api/subjects', { name: maths.name, intensity: 2 });
+  await call('PUT', '/api/subjects', { name: maths.name, enabled: false });
+  assert.equal((await agenda(call)).filter(s => s.subject === maths.name).length, 0);
+  assert.equal((await call('GET', '/api/subjects'))[0].enabled, 0);
+  const week = await call('GET', `/api/week?start=${addDays(TODAY, -TODAY_WEEKDAY())}`);
+  assert.ok(week.courses.some(c => c.subject === maths.name), 'les cours restent dans le calendrier');
+  await call('PUT', '/api/subjects', { name: maths.name, enabled: true });
+  const back = (await agenda(call)).filter(s => s.subject === maths.name);
+  assert.ok(back.length > 0);
+  assert.equal((await call('GET', '/api/subjects'))[0].intensity, 2, 'intensité conservée');
+  await rejects(call('PUT', '/api/subjects', { name: 'Inconnue', enabled: false }), 404);
+});
+const TODAY_WEEKDAY = () => (new Date(TODAY + 'T12:00:00').getDay() + 6) % 7;

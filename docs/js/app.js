@@ -3,6 +3,7 @@ import { createBackend } from './backend.js';
 import { Store } from './store.js';
 import { openLibrary, fold } from './library.js';
 import { extractText, kindOf, ACCEPT } from './extract.js';
+import { openPdf, mountPages } from './pdfview.js';
 import * as AI from './ai.js';
 import { mdToHtml } from './md.js';
 
@@ -392,7 +393,7 @@ $('#block-form').onsubmit = guard(async e => {
 });
 
 /* ---------------------------------------------------------------- cours d'une matière */
-const KIND_ICON = { pdf: '📕', docx: '📘', text: '📝' };
+const KIND_ICON = { pdf: '📕', docx: '📘', pptx: '📙', text: '📝' };
 const fmtSize = b => b >= 1048576 ? `${(b / 1048576).toFixed(1)} Mo` : `${Math.max(1, Math.round(b / 1024))} Ko`;
 let currentSubject = null;
 
@@ -451,12 +452,54 @@ $('#doc-file').onchange = guard(async e => { const f = [...e.target.files]; e.ta
 let doc = null, aiBusy = false, docToken = 0;
 let aiSettings = AI.loadSettings();
 
+/** Une diapositive PowerPoint : titre, puces indentées, notes du présentateur. */
+function slideCard(n, body) {
+  const lines = body.split('\n').filter(l => l.trim());
+  let title = '', notes = '';
+  if (lines.length && !/^\s*- /.test(lines[0]) && !lines[0].startsWith('Notes : ')) title = lines.shift();
+  if (lines.length && lines[lines.length - 1].startsWith('Notes : ')) notes = lines.pop().slice(8);
+  const items = lines.map(l => { const m = l.match(/^( *)- (.*)$/); return m ? { l: m[1].length / 2, t: m[2] } : { l: 0, t: l.trim() }; });
+  return `<section class="slide"><div class="slide-n">Diapo ${esc(n)}</div>${title ? `<h3>${esc(title)}</h3>` : ''}
+    ${items.length ? `<ul>${items.map(i => `<li style="margin-left:${i.l * 1.25}rem">${esc(i.t)}</li>`).join('')}</ul>` : ''}
+    ${notes ? `<p class="slide-notes"><b>Notes</b> · ${esc(notes)}</p>` : ''}</section>`;
+}
 function renderReader(text) {
-  const parts = text.split(/\n*\[Page (\d+)\]\n/);                 // [avant, n°, texte, n°, texte…]
+  const parts = text.split(/\n*\[(Page|Diapo) (\d+)\]\n/);          // [avant, type, n°, texte, type, n°, texte…]
   const para = t => t.split(/\n{2,}/).filter(x => x.trim()).map(x => `<p>${esc(x.trim())}</p>`).join('');
   let html = parts[0].trim() ? para(parts[0]) : '';
-  for (let i = 1; i < parts.length; i += 2) html += `<div class="page-mark">Page ${esc(parts[i])}</div>${para(parts[i + 1] || '')}`;
+  for (let i = 1; i < parts.length; i += 3) {
+    html += parts[i] === 'Diapo' ? slideCard(parts[i + 1], parts[i + 2] || '')
+      : `<div class="page-mark">Page ${esc(parts[i + 1])}</div>${para(parts[i + 2] || '')}`;
+  }
   $('#doc-text').innerHTML = html;
+}
+
+/* PDF : affichage visuel des pages (idéal pour des diapositives exportées) ou texte extrait */
+let pdfHandle = null, pdfMount = null;
+function leavePdf() {
+  if (pdfMount) pdfMount.destroy(); else if (pdfHandle) { try { pdfHandle.pdf.destroy(); } catch { /* déjà fermé */ } }
+  pdfHandle = null; pdfMount = null;
+  $('#doc-mode').classList.add('hidden'); $('#doc-pages').classList.add('hidden'); $('#doc-pages').textContent = '';
+  $('#doc-text').classList.remove('hidden'); $('#doc-article').classList.remove('reader-wide');
+}
+function setMode(mode) {
+  const pages = mode === 'pages' && !!pdfHandle;
+  $$('#doc-mode [data-mode]').forEach(b => b.classList.toggle('mode-active', b.dataset.mode === (pages ? 'pages' : 'text')));
+  $('#doc-text').classList.toggle('hidden', pages);
+  $('#doc-pages').classList.toggle('hidden', !pages);
+  $('#doc-article').classList.toggle('reader-wide', pages);
+  if (pages && !pdfMount) pdfMount = mountPages(pdfHandle, $('#doc-pages'), pdfHandle.landscape ? 'Diapo' : 'Page');
+}
+$$('#doc-mode [data-mode]').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+async function setupPdf(d, token) {
+  if (d.kind !== 'pdf' || !d.blob) return;
+  try {
+    const h = await openPdf(d.blob);
+    if (token !== docToken) { try { h.pdf.destroy(); } catch { /* ignoré */ } return; }
+    pdfHandle = h;
+    $('#doc-mode').classList.remove('hidden');
+    setMode(h.landscape ? 'pages' : 'text');       // un PDF en paysage = très probablement des diapositives
+  } catch { /* PDF non affichable : on garde le texte */ }
 }
 
 const scrollChat = () => { const b = $('#ai-scroll'); b.scrollTop = b.scrollHeight; };
@@ -538,7 +581,7 @@ $('#ai-form').onsubmit = e => { e.preventDefault(); sendQuestion($('#ai-input').
 async function loadDoc(id) {
   const d = await library.get(id);
   if (!d) { toast('Cours introuvable', false); return show('subjects'); }
-  docToken++; doc = d; aiBusy = false; $('#ai-send').disabled = false;
+  docToken++; leavePdf(); doc = d; aiBusy = false; $('#ai-send').disabled = false;
   aiSettings = AI.loadSettings();
   $('#doc-title').textContent = d.name;
   $('#doc-sub').textContent = `${d.subject_name} · ${fmtSize(d.size)} · ${d.text.length.toLocaleString('fr-FR')} caractères`;
@@ -547,6 +590,7 @@ async function loadDoc(id) {
   $('#ai-model').textContent = aiConfig().key ? aiConfig().model : '';
   renderReader(d.text); renderChat();
   window.scrollTo({ top: 0 });
+  setupPdf(d, docToken);
   if (d.summary) renderSummary('ready'); else summarize();
 }
 $('#doc-back').onclick = () => show('subject', doc ? doc.subject_name : '');

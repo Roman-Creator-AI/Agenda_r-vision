@@ -106,3 +106,30 @@ test('PDF LaTeX : accents extraits séparément recollés à leur lettre', () =>
   assert.equal(fixAccents('pr` es, Th¨ eme, fa¸ cade'), 'près, Thème, façade'.replace('Thème', 'Thëme'));
   assert.equal(fixAccents('Texte normal déjà accentué'), 'Texte normal déjà accentué');
 });
+
+/* ---- PowerPoint */
+import { pptxText, parseSlideXml, slideToText } from '../docs/js/extract.js';
+const sp = (ph, paras) => `<p:sp><p:nvSpPr><p:nvPr>${ph ? `<p:ph type="${ph}"/>` : ''}</p:nvPr></p:nvSpPr><p:txBody>${paras.map(([l, t]) =>
+  `<a:p><a:pPr lvl="${l}"/><a:r><a:t>${t}</a:t></a:r></a:p>`).join('')}</p:txBody></p:sp>`;
+const fakeZip = files => ({ files, file: p => (p in files ? { async: async () => files[p] } : null) });
+
+test('pptx : titre, puces par niveau, entités XML, notes, zones de pied de page ignorées', () => {
+  const xml = `<p:sld>${sp('title', [[0, 'Effet &amp; tunnel']])}${sp('body', [[0, 'Barri&#232;re de potentiel'], [1, 'T &lt; 1']])}${sp('sldNum', [[0, '3']])}</p:sld>`;
+  const shapes = parseSlideXml(xml);
+  const notes = parseSlideXml(`<p:notes>${sp('body', [[0, 'Insister sur l\'exponentielle']])}</p:notes>`);
+  assert.equal(slideToText(2, shapes, notes),
+    '[Diapo 2]\nEffet & tunnel\n- Barrière de potentiel\n  - T < 1\nNotes : Insister sur l\'exponentielle');
+});
+
+test('pptx : ordre réel des diapositives (presentation.xml) et notes via les relations', async () => {
+  const slide = t => `<p:sld>${sp('title', [[0, t]])}</p:sld>`;
+  const zip = fakeZip({
+    'ppt/slides/slide1.xml': slide('Premier fichier'), 'ppt/slides/slide2.xml': slide('Deuxième fichier'),
+    'ppt/presentation.xml': '<p:presentation><p:sldIdLst><p:sldId id="1" r:id="rA"/><p:sldId id="2" r:id="rB"/></p:sldIdLst></p:presentation>',
+    'ppt/_rels/presentation.xml.rels': '<Relationships><Relationship Id="rA" Target="slides/slide2.xml"/><Relationship Id="rB" Target="slides/slide1.xml"/></Relationships>',
+    'ppt/slides/_rels/slide2.xml.rels': '<Relationships><Relationship Id="r1" Type="http://x/notesSlide" Target="../notesSlides/notesSlide7.xml"/></Relationships>',
+    'ppt/notesSlides/notesSlide7.xml': `<p:notes>${sp('body', [[0, 'Note de la première diapo']])}</p:notes>`,
+  });
+  assert.equal(await pptxText(zip), '[Diapo 1]\nDeuxième fichier\nNotes : Note de la première diapo\n\n[Diapo 2]\nPremier fichier');
+  await assert.rejects(pptxText(fakeZip({})), /illisible/);
+});

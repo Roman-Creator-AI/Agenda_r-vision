@@ -63,6 +63,24 @@ export const QUICK_ACTIONS = [
   { icon: '🗂️', label: 'Fiche de révision', prompt: 'Rédige une fiche de révision d\'une page sur ce cours.' },
 ];
 
+/** Série de questions de rappel (test façon carte Anki) : le modèle ne doit répondre qu'avec du JSON. */
+export const quizRequest = n => `Écris 5 questions de rappel actif pour tester la mémoire de l'étudiant sur ce cours, de la plus simple à la plus difficile. Varie les notions interrogées (série n°${n}).
+Chaque question est courte et précise ; la réponse tient en une à trois phrases et s'appuie sur le cours.
+Réponds UNIQUEMENT par un tableau JSON, sans texte autour : [{"q":"question","a":"réponse"}, ...]`;
+
+/** Extrait [{q, a}] de la réponse du modèle (tolère les ```json … ``` et le texte autour). Renvoie null si inexploitable. */
+export function parseQuiz(text) {
+  const t = String(text || '');
+  const i = t.indexOf('['), j = t.lastIndexOf(']');
+  if (i < 0 || j <= i) return null;
+  let arr;
+  try { arr = JSON.parse(t.slice(i, j + 1)); } catch { return null; }
+  if (!Array.isArray(arr)) return null;
+  const cards = arr.filter(c => c && typeof c.q === 'string' && typeof c.a === 'string' && c.q.trim() && c.a.trim())
+    .slice(0, 8).map(c => ({ q: c.q.trim(), a: c.a.trim() }));
+  return cards.length >= 2 ? cards : null;
+}
+
 /* ------------------------------------------------------------ requêtes (fonctions pures, testables) */
 export function buildRequest(provider, { key, model, system, messages }) {
   const msgs = messages.slice(-MAX_HISTORY).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) }));

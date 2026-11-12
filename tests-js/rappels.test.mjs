@@ -133,3 +133,14 @@ test('bibliothèque : cours à revoir, plus en retard d\'abord, puis prochain ra
   assert.equal((await lib.withSrs()).length, 3);
   assert.ok(!('text' in r.due[0]) && r.due[0].srs.due === '2026-11-09');
 });
+
+test('bibliothèque : le filtre « matières actives » écarte les cours des matières retirées', async () => {
+  const lib = await openLibrary(null);
+  const mk = async (subject, name) => { const id = await lib.add({ subject, name, kind: 'text', size: 1, text: 'x' }); await lib.update(id, { srs: { ...SRS.startCard('2026-11-01'), due: '2026-11-05' } }); return id; };
+  const keepId = await mk('Maths', 'a'); await mk('Sport', 'b');
+  const keep = r => r.subject === 'maths';
+  assert.deepEqual((await lib.withSrs(keep)).map(x => x.id), [keepId]);
+  const r = await lib.reviews('2026-11-12', keep);
+  assert.deepEqual(r.due.map(x => x.id), [keepId]); assert.equal(r.total, 1);
+  assert.equal((await lib.reviews('2026-11-12')).total, 2);
+});

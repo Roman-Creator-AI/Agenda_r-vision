@@ -110,41 +110,54 @@
     </section>
 
     <!-- Lecture d'un cours + assistant -->
-    <section id="view-doc" class="view hidden">
-      <div class="flex flex-wrap items-center gap-2 mb-3">
-        <button id="doc-back" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100 text-sm">← <span id="doc-back-label">Retour</span></button>
-        <div class="min-w-0 basis-full order-last sm:basis-0 sm:order-none sm:flex-1">
-          <h2 id="doc-title" class="font-semibold truncate"></h2>
-          <p id="doc-sub" class="text-xs text-slate-500"></p>
+    <section id="view-doc" class="view hidden" style="--accent:#4f46e5;--accent-ink:#fff">
+      <div id="doc-progress" class="doc-progress" role="progressbar" aria-label="Avancement de la lecture" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+      <header class="doc-head">
+        <div class="doc-head-main">
+          <button id="doc-back" type="button" class="doc-back"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><span id="doc-back-label">Retour</span></button>
+          <h2 id="doc-title" class="doc-title"></h2>
+          <div id="doc-meta" class="doc-meta"></div>
         </div>
-        <div id="doc-mode" class="hidden inline-flex rounded-lg border bg-white overflow-hidden text-sm" role="group" aria-label="Affichage du cours">
-          <button type="button" data-mode="pages" class="mode-btn px-3 py-1.5">🖼️ Pages</button>
-          <button type="button" data-mode="text" class="mode-btn px-3 py-1.5">📝 Texte</button>
-        </div>
-        <button id="doc-original" class="ml-auto sm:ml-0 px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100 text-sm">📄 Original</button>
-      </div>
-      <div class="doc-layout">
-        <article id="doc-article" class="reader"><div id="doc-text" class="reader-text"></div><div id="doc-pages" class="pdf-pages hidden"></div></article>
-        <aside class="assistant" aria-label="Assistant d'étude">
-          <header class="assistant-head">
-            <span aria-hidden="true">✨</span><h3 class="font-semibold">Assistant</h3>
-            <span id="ai-model" class="text-[11px] text-slate-400 truncate"></span>
-            <button id="ai-settings" class="ml-auto text-lg leading-none px-1" title="Réglages de l'assistant" aria-label="Réglages de l'assistant">⚙️</button>
-          </header>
-          <div id="ai-scroll" class="assistant-body">
-            <section class="summary-card">
-              <div class="flex items-center gap-2 mb-2">
-                <h4 class="font-semibold text-sm">Les grands points</h4>
-                <button id="ai-resum" class="ml-auto text-xs text-slate-500 underline hidden">Régénérer</button>
-              </div>
-              <div id="ai-summary" class="ai-md"></div>
-            </section>
-            <div id="ai-chat" class="flex flex-col gap-3"></div>
+        <div class="doc-tools" role="toolbar" aria-label="Outils de lecture">
+          <div id="doc-mode" class="seg hidden" role="group" aria-label="Affichage du cours">
+            <button type="button" data-mode="pages">Pages</button><button type="button" data-mode="text">Texte</button>
           </div>
-          <div id="ai-suggest" class="px-3 pb-2 flex flex-wrap gap-1.5"></div>
-          <form id="ai-form" class="assistant-form">
-            <textarea id="ai-input" rows="1" maxlength="2000" placeholder="Pose une question sur ce cours…" class="flex-1 border rounded-xl px-3 py-2 resize-none"></textarea>
-            <button id="ai-send" class="px-3 py-2 bg-slate-900 text-white rounded-xl text-sm">Envoyer</button>
+          <div id="doc-size" class="seg" role="group" aria-label="Taille du texte">
+            <button type="button" data-size="-1" aria-label="Réduire le texte" title="Réduire le texte">A−</button><button type="button" data-size="1" aria-label="Agrandir le texte" title="Agrandir le texte">A+</button>
+          </div>
+          <button id="doc-original" type="button" class="tool" title="Ouvrir le fichier d'origine"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg><span>Original</span></button>
+          <button id="doc-ai-toggle" type="button" class="tool hidden" aria-pressed="true" title="Afficher ou masquer l'assistant"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/></svg><span>Assistant</span></button>
+          <button id="doc-full" type="button" class="tool tool-primary" aria-pressed="false" title="Lire en plein écran (touche F)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span id="doc-full-label">Plein écran</span></button>
+        </div>
+      </header>
+      <div class="doc-layout">
+        <article id="doc-article" class="reader" tabindex="-1" aria-label="Contenu du cours"><div id="doc-text" class="reader-text"></div><div id="doc-pages" class="pdf-pages hidden"></div></article>
+        <aside id="assistant" class="assistant" aria-label="Assistant d'étude">
+          <header class="ai-head">
+            <span class="ai-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18 15l.7 1.8 1.8.7-1.8.7L18 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg></span>
+            <div class="min-w-0 flex-1"><h3>Assistant</h3><p id="ai-status" class="ai-status"></p></div>
+            <button id="ai-reset-chat" type="button" class="icon-btn" title="Effacer la conversation" aria-label="Effacer la conversation"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>
+            <button id="ai-settings" type="button" class="icon-btn" title="Réglages de l'assistant" aria-label="Réglages de l'assistant"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+          </header>
+          <div id="ai-scroll" class="ai-body">
+            <details class="ai-summary" open>
+              <summary>Les grands points</summary>
+              <div id="ai-summary" class="ai-md"></div>
+              <button id="ai-resum" type="button" class="link-btn hidden">Régénérer le résumé</button>
+            </details>
+            <div id="ai-empty" class="ai-empty">
+              <p>Une question sur ce cours ? Pars d'une idée :</p>
+              <ul id="ai-suggest" class="ai-actions"></ul>
+            </div>
+            <div id="ai-chat" class="ai-chat" aria-live="polite"></div>
+          </div>
+          <form id="ai-form" class="ai-form">
+            <div id="ai-quick" class="ai-quick"></div>
+            <div class="ai-input">
+              <textarea id="ai-input" rows="1" maxlength="2000" placeholder="Pose ta question…" aria-label="Ta question sur le cours"></textarea>
+              <button id="ai-send" type="submit" class="ai-send" aria-label="Envoyer"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+            </div>
+            <p class="ai-hint">Entrée envoie, Maj+Entrée passe à la ligne.</p>
           </form>
         </aside>
       </div>

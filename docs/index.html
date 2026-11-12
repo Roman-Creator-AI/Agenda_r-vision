@@ -117,10 +117,14 @@
           <h2 id="doc-title" class="font-semibold truncate"></h2>
           <p id="doc-sub" class="text-xs text-slate-500"></p>
         </div>
+        <div id="doc-mode" class="hidden inline-flex rounded-lg border bg-white overflow-hidden text-sm" role="group" aria-label="Affichage du cours">
+          <button type="button" data-mode="pages" class="mode-btn px-3 py-1.5">🖼️ Pages</button>
+          <button type="button" data-mode="text" class="mode-btn px-3 py-1.5">📝 Texte</button>
+        </div>
         <button id="doc-original" class="ml-auto sm:ml-0 px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100 text-sm">📄 Original</button>
       </div>
       <div class="doc-layout">
-        <article class="reader"><div id="doc-text" class="reader-text"></div></article>
+        <article id="doc-article" class="reader"><div id="doc-text" class="reader-text"></div><div id="doc-pages" class="pdf-pages hidden"></div></article>
         <aside class="assistant" aria-label="Assistant d'étude">
           <header class="assistant-head">
             <span aria-hidden="true">✨</span><h3 class="font-semibold">Assistant</h3>

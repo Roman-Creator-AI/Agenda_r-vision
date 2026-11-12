@@ -171,3 +171,46 @@ body.no-scroll { overflow:hidden; }
 /* Corrections de priorité : « hidden » doit toujours gagner, et le champ de saisie porte son propre anneau de focus */
 #view-doc .hidden { display:none !important; }
 #view-doc .ai-input textarea:focus-visible { outline:none; }
+
+/* ---- Rappels de mémorisation */
+.rv-quiet { padding:.7rem 1rem; border:1px dashed #cbd5e1; border-radius:.75rem; font-size:.85rem; color:#475569; background:#fff; }
+.rv-item { display:flex; align-items:center; gap:.5rem; padding:.55rem .7rem; border:1px solid #e2e8f0; border-left-width:4px; border-radius:.6rem; background:#fff; }
+.rv-btn { flex:none; padding:.3rem .65rem; border:1px solid #d0d5dd; border-radius:.5rem; font-size:.8rem; background:#fff; color:#1c2430; }
+.rv-btn:hover { background:#f3f4f6; }
+.rv-btn-primary { background:#1c2430; border-color:#1c2430; color:#fff; } .rv-btn-primary:hover { background:#0f1620; }
+
+.srs-row { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem .75rem; margin-top:.6rem; }
+.srs-hint { font-size:.78rem; color:var(--muted); }
+.srs-pill { font-size:.8rem; padding:.25rem .65rem; border-radius:999px; background:#f2f4f7; color:var(--ink); }
+.srs-pill.due { background:#fef0c7; color:#7a2e0e; }
+.doc-full .srs-row { display:none; }
+
+.review-bar { margin:0 0 1rem; padding:.85rem 1rem; border:1px solid color-mix(in srgb, var(--accent) 45%, #fff); background:var(--wash); border-radius:.6rem; }
+.review-step p { font-size:.9rem; color:var(--ink); margin-bottom:.6rem; }
+.review-actions, .quiz-actions { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; }
+.grade-row { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.5rem; }
+.grade { display:flex; flex-direction:column; align-items:center; gap:.1rem; padding:.55rem .3rem; border:1px solid #d0d5dd; border-radius:.6rem; background:#fff; color:var(--ink); }
+.grade b { font-size:.88rem; } .grade small { font-size:.72rem; color:var(--muted); }
+.grade:hover { background:#f3f4f6; }
+.grade.suggested { border-color:var(--ink); box-shadow:0 0 0 2px var(--ink); }
+.doc-full .review-bar { flex:none; margin-bottom:.6rem; }
+@media (max-width:520px) { .grade-row { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+.quiz-dialog { width:min(40rem,94vw); max-height:90dvh; padding:0; border:0; border-radius:.9rem; background:#fff; color:var(--ink); overflow:auto; }
+.quiz-dialog::backdrop { background:rgba(16,24,40,.45); }
+.quiz-head { display:flex; align-items:center; gap:.75rem; padding:.8rem 1rem; border-bottom:1px solid var(--line); position:sticky; top:0; background:#fff; }
+.quiz-head h3 { font-weight:600; font-size:.95rem; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.quiz-count { font-size:.8rem; color:var(--muted); }
+.quiz-body { padding:1.25rem 1.25rem 1.5rem; display:flex; flex-direction:column; gap:1rem; }
+.quiz-progress { height:4px; border-radius:2px; background:#eef0f3; } .quiz-progress i { display:block; height:100%; background:var(--accent); border-radius:2px; transition:width .2s; }
+.quiz-q { font-family:var(--serif); font-size:1.25rem; line-height:1.5; font-weight:600; }
+.quiz-a { padding:.8rem 1rem; border-left:3px solid var(--accent); background:var(--wash); border-radius:0 .5rem .5rem 0; }
+.quiz-note { font-size:.85rem; color:var(--muted); }
+.quiz-score { font-family:var(--serif); font-size:2.4rem; font-weight:700; line-height:1; }
+@media (prefers-reduced-motion: reduce) { .quiz-progress i { transition:none } }
+
+/* Rappels facultatifs dans le calendrier : contour pointillé, sans fond, pour les distinguer des vraies séances */
+.ev.remind { background:rgba(255,255,255,.85); border:1.5px dashed currentColor; border-radius:.3rem; padding:0 .25rem; font-size:10px; line-height:13px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; cursor:pointer; z-index:2; }
+.ev.remind:hover, .ev.remind:focus-visible { background:#fff; outline:2px solid currentColor; outline-offset:1px; }
+.ev.remind .mini { float:right; line-height:9px; }
+.srs-date { padding:.2rem .4rem; border:1px solid #d0d5dd; border-radius:.4rem; font-size:.8rem; }

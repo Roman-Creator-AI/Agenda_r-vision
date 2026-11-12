@@ -5,6 +5,7 @@ import { openLibrary, fold } from './library.js';
 import { extractText, kindOf, ACCEPT } from './extract.js';
 import { openPdf, mountPages } from './pdfview.js';
 import * as AI from './ai.js';
+import * as SRS from './srs.js';
 import { mdToHtml } from './md.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -127,6 +128,7 @@ $('#move-reset').onclick = guard(async () => {
 
 /* ---------------------------------------------------------------- tableau de bord */
 async function loadDashboard() {
+  renderDueCard($('#review-card-dash')).catch(() => {});
   const [t, w, subs] = await Promise.all([api('/api/today'), api(`/api/week?start=${iso(monday(new Date()))}`), api('/api/subjects')]);
   $('#today-date').textContent = fmtLong(t.date);
   index(t.todo); index(t.upcoming);
@@ -169,6 +171,7 @@ async function loadCalendar() {
   index(w.sessions);
   const end = new Date(weekStart); end.setDate(end.getDate() + 6);
   $('#week-title').textContent = `${weekStart.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} – ${end.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  const rvSlots = await reminderSlots(w);
   const hours = w.day_end - w.day_start;
   const axis = [...Array(hours)].map((_, i) => `<div class="hour-line text-[10px] text-slate-400 pr-1 text-right" style="height:${HOUR_PX}px">${pad(w.day_start + i)}h</div>`).join('');
   let head = '<div></div>', cols = `<div>${axis}</div>`;
@@ -177,6 +180,12 @@ async function loadCalendar() {
     const k = iso(d), today = k === iso(new Date());
     head += `<div class="p-2 border-l border-slate-200 ${today ? 'bg-slate-900 text-white' : ''}"><p class="text-sm font-medium capitalize">${fmtShort(k)}</p><div class="${today ? 'opacity-90' : ''}">${gauge(w.load[k]).split('<p')[0]}</div></div>`;
     const ev = [];
+    rvSlots.filter(r => r.day === k).forEach(r => {
+      const top = (+r.start.slice(0, 2) * 60 + +r.start.slice(3) - w.day_start * 60) / 60 * HOUR_PX;
+      ev.push(`<div class="ev remind" role="button" tabindex="0" data-rv-slot="${r.id}" style="top:${top}px;height:16px;color:${esc(r.color)}"
+        title="Rappel facultatif (${r.start}–${r.end}) : ${esc(r.name)}. Clique pour réviser."><b>🔁 ${esc(r.name)}</b>
+        <button type="button" class="mini" data-rv-skip="${r.id}" title="Reporter à demain" aria-label="Reporter à demain">✗</button></div>`);
+    });
     w.courses.filter(c => c.start.slice(0, 10) === k).forEach(c => {
       const top = (mins(c.start) - w.day_start * 60) / 60 * HOUR_PX, h = Math.max(18, (mins(c.end) - mins(c.start)) / 60 * HOUR_PX);
       ev.push(`<div class="ev" style="top:${top}px;height:${h}px;background:${esc(c.color)}22;border-left:4px solid ${esc(c.color)}" title="${esc(c.summary)}">
@@ -201,6 +210,28 @@ async function loadCalendar() {
     <div class="grid" style="grid-template-columns:44px repeat(7,1fr)">${cols}</div>`;
   bindSessionActions($('#calendar'));
   bindDrag(w.day_start);
+  $$('#calendar [data-rv-slot]').forEach(el => {
+    const open = () => { reviewIntent = el.dataset.rvSlot; show('doc', el.dataset.rvSlot); };
+    el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  });
+  $$('#calendar [data-rv-skip]').forEach(b => b.onclick = guard(async e => {
+    e.stopPropagation();
+    await updateSrs(b.dataset.rvSkip, c => SRS.snooze(c, todayIso(), 1)); toast('Reporté à demain'); await refresh();
+  }));
+}
+
+/** Rappels facultatifs de la semaine affichée, posés dans les trous libres (rien n'est enregistré : recalculé à chaque affichage). */
+async function reminderSlots(w) {
+  try {
+    const docs = await library.withSrs();
+    if (!docs.length) return [];
+    const colors = Object.fromEntries((await api('/api/subjects')).map(s => [fold(s.name), s.color]));
+    const now = new Date();
+    return SRS.placeReminders(docs, w, todayIso(), now.getHours() * 60 + now.getMinutes()).map(r => {
+      const d = docs.find(x => x.id === r.id);
+      return { ...r, name: d.name, color: colors[d.subject] || '#64748b' };
+    });
+  } catch { return []; }
 }
 
 function bindDrag(dayStart) {
@@ -229,6 +260,7 @@ $('#this-week').onclick = () => { weekStart = monday(new Date()); refresh(); };
 
 /* ---------------------------------------------------------------- agenda */
 async function loadAgenda() {
+  renderDueCard($('#review-card-agenda')).catch(() => {});
   const a = await api('/api/agenda');
   index(a.sessions);
   const byDay = {};
@@ -408,7 +440,8 @@ async function loadSubject(name) {
   const docs = await library.list(s.name);
   $('#docs-list').innerHTML = docs.length ? docs.map(d => `<li class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400" style="border-left:5px solid ${esc(s.color)}">
       <button data-doc="${d.id}" class="flex-1 min-w-0 text-left">
-        <p class="font-medium truncate">${KIND_ICON[d.kind] || '📄'} ${esc(d.name)} ${d.has_summary ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 align-middle">✨ résumé</span>' : ''}</p>
+        <p class="font-medium truncate">${KIND_ICON[d.kind] || '📄'} ${esc(d.name)} ${d.has_summary ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 align-middle">✨ résumé</span>' : ''}
+          ${d.srs ? `<span class="text-[10px] px-1.5 py-0.5 rounded align-middle ${d.srs.due <= iso(new Date()) ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}">🔁 ${esc(SRS.dueLabel(d.srs.due, iso(new Date())))}</span>` : ''}</p>
         <p class="text-xs text-slate-500">${fmtSize(d.size)} · ajouté le ${new Date(d.added).toLocaleDateString('fr-FR')}${d.messages ? ` · ${d.messages} message${d.messages > 1 ? 's' : ''}` : ''}</p>
       </button>
       <button data-rm="${d.id}" data-name="${esc(d.name)}" class="text-xs text-red-600 hover:underline shrink-0">Supprimer</button></li>`).join('')
@@ -686,6 +719,8 @@ async function loadDoc(id) {
   renderReader(d.text); renderChat();
   window.scrollTo({ top: 0 }); $('#doc-article').scrollTop = 0; updateProgress();
   setupPdf(d, docToken);
+  renderSrs();
+  if (reviewIntent === String(d.id) && d.srs) showReviewBar(); else hideReviewBar();
   if (d.summary) renderSummary('ready'); else summarize();
 }
 $('#doc-back').onclick = () => show('subject', doc ? doc.subject_name : '');
@@ -732,6 +767,147 @@ $('#ai-config-form').onsubmit = () => {
     if (!doc.summary && !aiBusy) summarize();
   }
 };
+
+/* ---------------------------------------------------------------- rappels de mémorisation (répétition espacée) */
+let reviewIntent = null;                                   // id du cours que l'utilisateur vient de choisir de réviser
+const todayIso = () => iso(new Date());
+
+async function updateSrs(id, fn) {                         // lit, transforme, enregistre la carte d'un cours
+  const r = await library.get(id);
+  if (!r) return null;
+  const srs = fn(r.srs || null);
+  await library.update(id, { srs });
+  return srs;
+}
+
+/** Carte « À revoir » du tableau de bord et de l'agenda : facultatif, jamais bloquant. */
+async function renderDueCard(el) {
+  const today = todayIso(), r = await library.reviews(today);
+  if (!r.total) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const colors = Object.fromEntries((await api('/api/subjects')).map(s => [fold(s.name), s.color]));
+  let html;
+  if (!r.due.length) {
+    html = `<div class="rv-quiet">🔁 Rien à revoir aujourd'hui. Prochain rappel ${esc(SRS.dueLabel(r.next.srs.due, today))} :
+      <button type="button" class="underline" data-rv-open="${r.next.id}">${esc(r.next.name)}</button></div>`;
+  } else {
+    const shown = r.due.slice(0, 5);
+    html = `<div class="bg-white rounded-xl border border-slate-200 p-5">
+      <div class="flex items-baseline gap-2 mb-1"><h2 class="font-semibold">À revoir</h2><span class="text-xs text-slate-500">${r.due.length} cours</span></div>
+      <p class="text-sm text-slate-500 mb-3">Pour que ça reste en mémoire. C'est facultatif : tu peux ignorer ou reporter sans conséquence.</p>
+      <ul class="space-y-2">${shown.map(d => `<li class="rv-item" style="border-left-color:${esc(colors[d.subject] || '#94a3b8')}">
+        <div class="min-w-0 flex-1"><button type="button" class="font-medium truncate text-left hover:underline max-w-full" data-rv-open="${d.id}">${esc(d.name)}</button>
+          <p class="text-xs text-slate-500">${esc(d.subject_name)}, ${esc(SRS.dueLabel(d.srs.due, today))}</p></div>
+        <button type="button" class="rv-btn rv-btn-primary" data-rv-go="${d.id}">Réviser</button>
+        <button type="button" class="rv-btn" data-rv-later="${d.id}" title="Reporter à demain">Demain</button></li>`).join('')}</ul>
+      ${r.due.length > shown.length ? `<p class="text-xs text-slate-500 mt-2">et ${r.due.length - shown.length} autre${r.due.length - shown.length > 1 ? 's' : ''}</p>` : ''}</div>`;
+  }
+  el.innerHTML = html; el.classList.remove('hidden');
+  $$('[data-rv-open]', el).forEach(b => b.onclick = () => show('doc', b.dataset.rvOpen));
+  $$('[data-rv-go]', el).forEach(b => b.onclick = () => { reviewIntent = b.dataset.rvGo; show('doc', b.dataset.rvGo); });
+  $$('[data-rv-later]', el).forEach(b => b.onclick = guard(async () => {
+    await updateSrs(b.dataset.rvLater, c => SRS.snooze(c, todayIso(), 1)); toast('Reporté à demain'); await renderDueCard(el);
+  }));
+}
+
+/** Ligne d'état sous le titre du cours : démarrer les rappels, ou voir/ lancer le prochain. */
+function renderSrs() {
+  const row = $('#srs-row'), c = doc.srs, today = todayIso();
+  if (!c) {
+    row.innerHTML = `<button type="button" id="srs-start" class="tool">✓ J'ai travaillé ce cours</button>
+      <label class="srs-hint">le <input type="date" id="srs-date" value="${today}" max="${today}" class="srs-date"></label>
+      <span class="srs-hint">Lance des rappels de mémorisation, facultatifs.</span>`;
+    $('#srs-start').onclick = guard(async () => {
+      const day = /^\d{4}-\d{2}-\d{2}$/.test($('#srs-date').value) && $('#srs-date').value <= todayIso() ? $('#srs-date').value : todayIso();
+      doc.srs = await updateSrs(doc.id, () => SRS.startCard(day));
+      toast(SRS.isDue(doc.srs, todayIso()) ? 'Rappels lancés : le premier est à faire dès maintenant' : `Rappels lancés : le premier est ${SRS.dueLabel(doc.srs.due, todayIso())}`); renderSrs();
+    });
+    return;
+  }
+  const due = SRS.isDue(c, today);
+  row.innerHTML = `<span class="srs-pill ${due ? 'due' : ''}">🔁 Rappel ${esc(SRS.dueLabel(c.due, today))}</span>
+    <button type="button" id="srs-review" class="tool ${due ? 'tool-primary' : ''}">Réviser maintenant</button>
+    <button type="button" id="srs-stop" class="link-btn">Arrêter les rappels</button>`;
+  $('#srs-review').onclick = () => { reviewIntent = String(doc.id); showReviewBar(); };
+  $('#srs-stop').onclick = guard(async () => {
+    if (!confirm('Arrêter les rappels de ce cours ? Son historique de révision sera effacé.')) return;
+    await updateSrs(doc.id, () => null); doc.srs = null; hideReviewBar(); renderSrs();
+  });
+}
+
+const gradeButtons = (card, suggested = '') => {
+  const iv = SRS.previewIntervals(card, todayIso());
+  return SRS.GRADES.map(g => `<button type="button" class="grade grade-${g.id}${g.id === suggested ? ' suggested' : ''}" data-grade="${g.id}" title="${esc(g.hint)}">
+    <b>${esc(g.label)}</b><small>${esc(SRS.intervalLabel(iv[g.id]))}</small></button>`).join('');
+};
+async function applyGrade(grade) {
+  if (!doc || !doc.srs) return;
+  doc.srs = await updateSrs(doc.id, c => SRS.review(c, grade, todayIso()));
+  toast(`Prochain rappel ${SRS.dueLabel(doc.srs.due, todayIso())}`);
+  reviewIntent = null; hideReviewBar(); renderSrs();
+  if ($('#quiz-dialog').open) $('#quiz-dialog').close();
+}
+function showReviewBar() {
+  $('#review-bar').classList.remove('hidden'); $('#review-choice').classList.remove('hidden'); $('#review-grade').classList.add('hidden');
+  $('#review-quiz').disabled = !aiConfig().key; $('#review-quiz').title = aiConfig().key ? '' : 'Ajoute d\'abord ta clé API dans les réglages de l\'assistant';
+}
+function hideReviewBar() { $('#review-bar').classList.add('hidden'); }
+function startReread() {
+  $('#review-choice').classList.add('hidden'); $('#review-grade').classList.remove('hidden');
+  $('#review-grade-btns').innerHTML = gradeButtons(doc.srs);
+  if ($('#quiz-dialog').open) $('#quiz-dialog').close();
+  $('#review-bar').scrollIntoView({ block: 'nearest' });
+}
+$('#review-reread').onclick = startReread;
+$('#review-cancel').onclick = () => { reviewIntent = null; hideReviewBar(); };
+$('#review-quiz').onclick = () => startQuiz();
+$('#review-grade-btns').onclick = guard(async e => { const b = e.target.closest('[data-grade]'); if (b) await applyGrade(b.dataset.grade); });
+
+/* ---- test de mémoire : questions de l'IA, réponse de tête, auto-évaluation */
+let quiz = null, quizSession = 0;
+async function startQuiz() {
+  if (!doc || !doc.srs) return;
+  if (!aiConfig().key) return openAiSettings();
+  const session = ++quizSession;
+  quiz = null; $('#quiz-title').textContent = doc.name;
+  if (!$('#quiz-dialog').open) $('#quiz-dialog').showModal();
+  quizRender('loading');
+  try {
+    const text = await AI.ask(aiConfig(), { system: aiContext(), messages: [{ role: 'user', content: AI.quizRequest(Date.now() % 1000) }] });
+    if (session !== quizSession) return;
+    const cards = AI.parseQuiz(text);
+    if (!cards) throw new Error('L\'assistant n\'a pas renvoyé de questions exploitables. Réessaie.');
+    quiz = { cards, i: 0, right: 0, revealed: false };
+    quizRender('card');
+  } catch (e) { if (session === quizSession) quizRender('error', e.message); }
+}
+function quizRender(state, msg = '') {
+  const el = $('#quiz-body'), q = quiz;
+  $('#quiz-count').textContent = state === 'card' ? `Question ${q.i + 1} sur ${q.cards.length}` : '';
+  if (state === 'loading') {
+    el.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><p class="quiz-note">L\'assistant prépare tes questions…</p>';
+  } else if (state === 'error') {
+    el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><div class="quiz-actions"><button type="button" id="quiz-retry" class="tool tool-primary">Réessayer</button><button type="button" id="quiz-reread" class="tool">Relire le cours à la place</button></div>`;
+    $('#quiz-retry').onclick = () => startQuiz(); $('#quiz-reread').onclick = startReread;
+  } else if (state === 'card') {
+    const c = q.cards[q.i];
+    el.innerHTML = `<div class="quiz-progress"><i style="width:${(q.i / q.cards.length) * 100}%"></i></div><p class="quiz-q">${esc(c.q)}</p>` + (q.revealed
+      ? `<div class="quiz-a ai-md">${mdToHtml(c.a)}</div><p class="quiz-note">Tu le savais ?</p>
+         <div class="quiz-actions"><button type="button" class="tool" data-know="0">Pas vraiment</button><button type="button" class="tool tool-primary" data-know="1">Je savais</button></div>`
+      : `<p class="quiz-note">Réponds de tête, ou à voix haute, puis vérifie.</p><div class="quiz-actions"><button type="button" id="quiz-reveal" class="tool tool-primary">Voir la réponse</button></div>`);
+    $('#quiz-reveal')?.addEventListener('click', () => { q.revealed = true; quizRender('card'); });
+    $$('[data-know]', el).forEach(b => b.onclick = () => {
+      q.right += Number(b.dataset.know); q.i++; q.revealed = false;
+      quizRender(q.i < q.cards.length ? 'card' : 'end');
+    });
+  } else {
+    const n = q.cards.length, suggested = SRS.suggestGrade(q.right / n);
+    el.innerHTML = `<p class="quiz-score">${q.right} / ${n}</p><p>Choisis la note qui correspond à ce que tu ressens : elle fixe la date du prochain rappel (suggestion en surbrillance).</p>
+      <div class="grade-row">${gradeButtons(doc.srs, suggested)}</div>`;
+    $$('[data-grade]', el).forEach(b => b.onclick = guard(async () => applyGrade(b.dataset.grade)));
+  }
+}
+$('#quiz-close').onclick = () => $('#quiz-dialog').close();
+$('#quiz-dialog').addEventListener('close', () => { quizSession++; });
 
 /* ---------------------------------------------------------------- navigation */
 async function refreshStatus() {

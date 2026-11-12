@@ -58,6 +58,14 @@ export class Library {
     for (const r of await this.b.all()) out[r.subject] = (out[r.subject] || 0) + 1;
     return out;
   }
+  /** Cours dont le rappel est dû (le plus en retard d'abord), et le prochain rappel à venir s'il n'y en a pas. */
+  async withSrs() { return (await this.b.all()).filter(r => r.srs).map(meta); }
+  async reviews(today) {
+    const all = await this.withSrs();
+    const due = all.filter(r => r.srs.due <= today).sort((a, b) => a.srs.due.localeCompare(b.srs.due));
+    const upcoming = all.filter(r => r.srs.due > today).sort((a, b) => a.srs.due.localeCompare(b.srs.due));
+    return { due, next: upcoming[0] || null, total: all.length };
+  }
   get(id) { return this.b.get(Number(id)); }
   async update(id, patch) {
     const r = await this.b.get(Number(id));

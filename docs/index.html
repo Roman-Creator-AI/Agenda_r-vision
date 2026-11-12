@@ -38,6 +38,7 @@
 
     <!-- Tableau de bord -->
     <section id="view-dashboard" class="view space-y-6">
+      <div id="review-card-dash" class="hidden"></div>
       <div class="grid md:grid-cols-3 gap-4">
         <div class="md:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
           <div class="flex items-center justify-between mb-3">
@@ -81,6 +82,7 @@
     <!-- Agenda de révision -->
     <section id="view-agenda" class="view hidden">
       <h2 class="font-semibold text-lg mb-4">Agenda de révision</h2>
+      <div id="review-card-agenda" class="hidden mb-4"></div>
       <div id="agenda-list" class="space-y-4"></div>
     </section>
 
@@ -117,6 +119,7 @@
           <button id="doc-back" type="button" class="doc-back"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><span id="doc-back-label">Retour</span></button>
           <h2 id="doc-title" class="doc-title"></h2>
           <div id="doc-meta" class="doc-meta"></div>
+          <div id="srs-row" class="srs-row"></div>
         </div>
         <div class="doc-tools" role="toolbar" aria-label="Outils de lecture">
           <div id="doc-mode" class="seg hidden" role="group" aria-label="Affichage du cours">
@@ -130,6 +133,20 @@
           <button id="doc-full" type="button" class="tool tool-primary" aria-pressed="false" title="Lire en plein écran (touche F)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span id="doc-full-label">Plein écran</span></button>
         </div>
       </header>
+      <div id="review-bar" class="review-bar hidden" role="region" aria-label="Rappel de mémorisation">
+        <div id="review-choice" class="review-step">
+          <p><b>Rappel de mémorisation.</b> C'est facultatif : choisis comment réviser ce cours.</p>
+          <div class="review-actions">
+            <button id="review-quiz" type="button" class="tool tool-primary">Me tester avec l'IA</button>
+            <button id="review-reread" type="button" class="tool">Relire le cours</button>
+            <button id="review-cancel" type="button" class="link-btn">Plus tard</button>
+          </div>
+        </div>
+        <div id="review-grade" class="review-step hidden">
+          <p><b>Comment te souviens-tu de ce cours ?</b> Ton choix fixe la date du prochain rappel.</p>
+          <div id="review-grade-btns" class="grade-row"></div>
+        </div>
+      </div>
       <div class="doc-layout">
         <article id="doc-article" class="reader" tabindex="-1" aria-label="Contenu du cours"><div id="doc-text" class="reader-text"></div><div id="doc-pages" class="pdf-pages hidden"></div></article>
         <aside id="assistant" class="assistant" aria-label="Assistant d'étude">
@@ -161,6 +178,12 @@
           </form>
         </aside>
       </div>
+
+      <dialog id="quiz-dialog" class="quiz-dialog" aria-labelledby="quiz-title">
+        <div class="quiz-head"><h3 id="quiz-title">Test de mémoire</h3><span id="quiz-count" class="quiz-count"></span>
+          <button id="quiz-close" type="button" class="icon-btn" aria-label="Fermer le test" title="Fermer">✕</button></div>
+        <div id="quiz-body" class="quiz-body"></div>
+      </dialog>
     </section>
 
     <!-- Import & sauvegarde -->
@@ -191,7 +214,7 @@
         <h2 class="font-semibold mb-1">Sauvegarde</h2>
         <p class="text-sm text-slate-500 mb-3">Tes données restent dans ce navigateur, sur cet appareil. Exporte-les pour les
           garder en lieu sûr ou les retrouver sur un autre appareil. Les fichiers de cours et la clé de l'assistant IA
-          n'en font pas partie : ils restent uniquement sur cet appareil.</p>
+          n'en font pas partie, pas plus que le suivi des rappels de mémorisation : ils restent uniquement sur cet appareil.</p>
         <div class="flex flex-wrap gap-2 items-center text-sm">
           <button id="btn-export" class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Exporter (.json)</button>
           <label class="px-3 py-1.5 border rounded-lg cursor-pointer hover:bg-slate-50">Restaurer…

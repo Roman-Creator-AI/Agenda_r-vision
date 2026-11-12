@@ -461,7 +461,7 @@ function slideCard(n, body) {
   const items = lines.map(l => { const m = l.match(/^( *)- (.*)$/); return m ? { l: m[1].length / 2, t: m[2] } : { l: 0, t: l.trim() }; });
   return `<section class="slide"><div class="slide-n">Diapo ${esc(n)}</div>${title ? `<h3>${esc(title)}</h3>` : ''}
     ${items.length ? `<ul>${items.map(i => `<li style="margin-left:${i.l * 1.25}rem">${esc(i.t)}</li>`).join('')}</ul>` : ''}
-    ${notes ? `<p class="slide-notes"><b>Notes</b> · ${esc(notes)}</p>` : ''}</section>`;
+    ${notes ? `<p class="slide-notes"><b>Notes du présentateur.</b> ${esc(notes)}</p>` : ''}</section>`;
 }
 function renderReader(text) {
   const parts = text.split(/\n*\[(Page|Diapo) (\d+)\]\n/);          // [avant, type, n°, texte, type, n°, texte…]
@@ -484,7 +484,7 @@ function leavePdf() {
 }
 function setMode(mode) {
   const pages = mode === 'pages' && !!pdfHandle;
-  $$('#doc-mode [data-mode]').forEach(b => b.classList.toggle('mode-active', b.dataset.mode === (pages ? 'pages' : 'text')));
+  $$('#doc-mode [data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === (pages ? 'pages' : 'text'))));
   $('#doc-text').classList.toggle('hidden', pages);
   $('#doc-pages').classList.toggle('hidden', !pages);
   $('#doc-article').classList.toggle('reader-wide', pages);
@@ -504,28 +504,48 @@ async function setupPdf(d, token) {
 
 const scrollChat = () => { const b = $('#ai-scroll'); b.scrollTop = b.scrollHeight; };
 function renderChat() {
-  $('#ai-chat').innerHTML = doc.chat.map(m => m.role === 'user'
-    ? `<div class="bubble bubble-user">${esc(m.content)}</div>` : `<div class="bubble bubble-ai ai-md">${mdToHtml(m.content)}</div>`).join('');
-  $('#ai-suggest').innerHTML = doc.chat.length ? '' : AI.SUGGESTIONS.map(q => `<button type="button" class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('');
-  $$('#ai-suggest [data-q]').forEach(b => b.onclick = () => sendQuestion(b.dataset.q));
+  const n = doc.chat.length;
+  $('#ai-chat').innerHTML = doc.chat.map((m, i) => m.role === 'user'
+    ? `<div class="msg msg-user">${esc(m.content)}</div>`
+    : `<div class="msg msg-ai"><div class="ai-md">${mdToHtml(m.content)}</div><button type="button" class="copy-btn" data-copy="${i}">Copier</button></div>`).join('');
+  $('#ai-empty').classList.toggle('hidden', n > 0);
+  $('#ai-suggest').innerHTML = AI.QUICK_ACTIONS.map((a, i) => `<li><button type="button" data-qa="${i}"><span aria-hidden="true">${a.icon}</span>${esc(a.label)}</button></li>`).join('');
+  $('#ai-quick').innerHTML = n ? AI.QUICK_ACTIONS.map((a, i) => `<button type="button" data-qa="${i}">${a.icon} ${esc(a.label)}</button>`).join('') : '';
+  $$('#ai-suggest [data-qa], #ai-quick [data-qa]').forEach(b => b.onclick = () => sendQuestion(AI.QUICK_ACTIONS[b.dataset.qa].prompt));
 }
+$('#ai-chat').addEventListener('click', async e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b || !doc) return;
+  try { await navigator.clipboard.writeText(doc.chat[b.dataset.copy].content); toast('Réponse copiée'); }
+  catch { toast('Copie impossible dans ce navigateur', false); }
+});
+$('#ai-reset-chat').onclick = guard(async () => {
+  if (!doc || !doc.chat.length || !confirm('Effacer la conversation de ce cours ?')) return;
+  doc.chat = []; await library.update(doc.id, { chat: [] }); renderChat();
+});
 const typing = on => {
   $('#ai-chat').querySelector('.typing-row')?.remove();
-  if (on) $('#ai-chat').insertAdjacentHTML('beforeend', '<div class="bubble bubble-ai typing-row"><span class="typing"><span></span><span></span><span></span></span></div>');
+  if (on) $('#ai-chat').insertAdjacentHTML('beforeend', '<div class="msg msg-ai typing-row" aria-label="L\'assistant écrit"><span class="typing"><span></span><span></span><span></span></span></div>');
   scrollChat();
 };
-const errBubble = msg => { $('#ai-chat').insertAdjacentHTML('beforeend', `<div class="bubble bubble-err" role="alert">${esc(msg)}</div>`); scrollChat(); };
+const errBubble = msg => { $('#ai-chat').insertAdjacentHTML('beforeend', `<div class="msg msg-err" role="alert">${esc(msg)}</div>`); scrollChat(); };
 const aiConfig = () => AI.activeConfig(aiSettings);
+function updateAiStatus(busyText = '') {
+  const el = $('#ai-status'), c = aiConfig();
+  el.className = 'ai-status' + (busyText ? ' busy' : c.key ? ' ready' : '');
+  el.textContent = busyText || (c.key ? c.model : 'Clé API à ajouter');
+}
 const aiContext = () => AI.systemPrompt({ subject: doc.subject_name, title: doc.name, text: doc.text });
 
 function renderSummary(state, msg = '') {
   const el = $('#ai-summary'), btn = $('#ai-resum');
   btn.classList.toggle('hidden', !(doc && doc.summary) || aiBusy);
+  if (state !== 'ready') el.closest('details').open = true;
   if (state === 'ready') el.innerHTML = mdToHtml(doc.summary);
-  else if (state === 'loading') el.innerHTML = '<span class="typing"><span></span><span></span><span></span></span> <span class="text-slate-500">Lecture du cours…</span>';
-  else if (state === 'nokey') el.innerHTML = `<p class="text-slate-600">Ajoute ta clé API pour obtenir un résumé du cours et poser tes questions.</p>
-      <button type="button" data-config class="mt-2 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-sm">Configurer l'assistant</button>`;
-  else el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><button type="button" data-retry class="mt-2 px-3 py-1.5 border rounded-lg text-sm">Réessayer</button>`;
+  else if (state === 'loading') el.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="sr-only">Lecture du cours en cours</span>';
+  else if (state === 'nokey') el.innerHTML = `<p class="text-slate-600">Ajoute ta clé API pour obtenir un résumé du cours et lui poser tes questions.</p>
+      <button type="button" data-config class="tool tool-primary mt-3">Ajouter ma clé</button>`;
+  else el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><button type="button" data-retry class="tool mt-3">Réessayer</button>`;
   $('[data-config]', el)?.addEventListener('click', openAiSettings);
   $('[data-retry]', el)?.addEventListener('click', () => summarize());
 }
@@ -533,7 +553,7 @@ function renderSummary(state, msg = '') {
 async function summarize() {
   const cfg = aiConfig(), token = docToken;
   if (!cfg.key) return renderSummary('nokey');
-  aiBusy = true; renderSummary('loading');
+  aiBusy = true; renderSummary('loading'); updateAiStatus('Lit le cours…');
   try {
     const text = await AI.ask(cfg, { system: aiContext(), messages: [{ role: 'user', content: AI.SUMMARY_REQUEST }] });
     if (token !== docToken) return;
@@ -544,7 +564,7 @@ async function summarize() {
     if (token !== docToken) return;
     aiBusy = false; renderSummary('error', e.message);
     if (e.code === 'auth') openAiSettings();
-  } finally { if (token === docToken) aiBusy = false; }
+  } finally { if (token === docToken) { aiBusy = false; updateAiStatus(); } }
 }
 $('#ai-resum').onclick = () => { if (!aiBusy) summarize(); };
 
@@ -553,7 +573,7 @@ async function sendQuestion(text) {
   if (!text || aiBusy || !doc) return;
   const cfg = aiConfig(), token = docToken;
   if (!cfg.key) return openAiSettings();
-  aiBusy = true; $('#ai-send').disabled = true;
+  aiBusy = true; $('#ai-send').disabled = true; updateAiStatus('Réfléchit…');
   doc.chat.push({ role: 'user', content: text });
   renderChat(); typing(true);
   try {
@@ -570,7 +590,7 @@ async function sendQuestion(text) {
     renderChat(); $('#ai-input').value = text; autosize(); errBubble(e.message);
     if (e.code === 'auth' || e.code === 'nokey') openAiSettings();
   } finally {
-    if (token === docToken) { aiBusy = false; $('#ai-send').disabled = false; typing(false); renderSummary(doc.summary ? 'ready' : 'nokey'); scrollChat(); }
+    if (token === docToken) { aiBusy = false; $('#ai-send').disabled = false; typing(false); updateAiStatus(); renderSummary(doc.summary ? 'ready' : 'nokey'); scrollChat(); }
   }
 }
 const autosize = () => { const t = $('#ai-input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; };
@@ -578,18 +598,93 @@ $('#ai-input').oninput = autosize;
 $('#ai-input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendQuestion(e.target.value); } };
 $('#ai-form').onsubmit = e => { e.preventDefault(); sendQuestion($('#ai-input').value); };
 
+const KIND_LABEL = { pdf: 'PDF', docx: 'Word', pptx: 'PowerPoint', text: 'Texte' };
+const inkOn = hex => {                                    // texte lisible (blanc ou noir) sur la couleur de la matière
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return '#fff';
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16) / 255).map(c => (c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4));
+  return .2126 * r + .7152 * g + .0722 * b > .35 ? '#1c2430' : '#fff';
+};
+function renderMeta(d) {
+  const marks = d.text.match(/^\[(Page|Diapo) \d+\]$/gm) || [];
+  const unit = d.kind === 'pptx' || (marks[0] || '').startsWith('[Diapo') ? 'diapo' : 'page';
+  const words = (d.text.match(/\S+/g) || []).length;
+  const parts = [`<span>${KIND_LABEL[d.kind] || 'Document'}</span>`];
+  if (marks.length) parts.push(`<span><b>${marks.length}</b> ${unit}${marks.length > 1 ? 's' : ''}</span>`);
+  parts.push(`<span><b>${Math.max(1, Math.round(words / 200))} min</b> de lecture</span>`, `<span>${fmtSize(d.size)}</span>`);
+  $('#doc-meta').innerHTML = parts.join('');
+}
+
+/* ---- taille du texte, progression de lecture, plein écran */
+const SIZE_KEY = 'campass-revisions-reader-size';
+let readerSize = 1.08;
+try { const v = Number(localStorage.getItem(SIZE_KEY)); if (v >= .9 && v <= 1.6) readerSize = v; } catch { /* stockage indisponible */ }
+const applySize = () => $('#doc-text').style.setProperty('--reader-size', readerSize + 'rem');
+$$('#doc-size [data-size]').forEach(b => b.onclick = () => {
+  readerSize = Math.min(1.6, Math.max(.9, Math.round((readerSize + Number(b.dataset.size) * .08) * 100) / 100));
+  applySize(); try { localStorage.setItem(SIZE_KEY, String(readerSize)); } catch { /* ignoré */ }
+});
+
+function updateProgress() {
+  if (view !== 'doc') return;
+  const a = $('#doc-article'); let ratio;
+  if ($('#view-doc').classList.contains('doc-full')) ratio = a.scrollTop / Math.max(1, a.scrollHeight - a.clientHeight);
+  else { const r = a.getBoundingClientRect(); ratio = -r.top / Math.max(1, r.height - innerHeight * .7); }
+  ratio = Math.min(1, Math.max(0, ratio));
+  $('#doc-progress i').style.width = (ratio * 100).toFixed(1) + '%';
+  $('#doc-progress').setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+}
+addEventListener('scroll', updateProgress, { passive: true });
+$('#doc-article').addEventListener('scroll', updateProgress, { passive: true });
+addEventListener('resize', updateProgress);
+
+const full = { on: false };
+function setFull(on) {
+  const v = $('#view-doc');
+  full.on = on;
+  v.classList.toggle('doc-full', on);
+  document.body.classList.toggle('no-scroll', on);
+  $('#doc-full').setAttribute('aria-pressed', String(on));
+  $('#doc-full-label').textContent = on ? 'Quitter' : 'Plein écran';
+  $('#doc-ai-toggle').classList.toggle('hidden', !on);
+  if (on) {
+    v.classList.toggle('ai-hidden', innerWidth < 1024);               // sur petit écran, l'assistant s'ouvre à la demande
+    $('#doc-ai-toggle').setAttribute('aria-pressed', String(!v.classList.contains('ai-hidden')));
+    // vrai plein écran du navigateur quand il existe (pas sur iPhone) ; sinon le mode « plein cadre » CSS suffit
+    try { (v.requestFullscreen || v.webkitRequestFullscreen)?.call(v)?.catch?.(() => {}); } catch { /* ignoré */ }
+  } else {
+    v.classList.remove('ai-hidden');
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+  requestAnimationFrame(updateProgress);
+}
+$('#doc-full').onclick = () => setFull(!full.on);
+$('#doc-ai-toggle').onclick = () => {
+  const v = $('#view-doc'); v.classList.toggle('ai-hidden');
+  $('#doc-ai-toggle').setAttribute('aria-pressed', String(!v.classList.contains('ai-hidden')));
+};
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && full.on) setFull(false); });
+document.addEventListener('keydown', e => {
+  if (view !== 'doc' || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'Escape' && full.on && !document.fullscreenElement) setFull(false);
+  else if ((e.key === 'f' || e.key === 'F') && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !$('#ai-dialog').open) { e.preventDefault(); setFull(!full.on); }
+});
+
 async function loadDoc(id) {
   const d = await library.get(id);
   if (!d) { toast('Cours introuvable', false); return show('subjects'); }
   docToken++; leavePdf(); doc = d; aiBusy = false; $('#ai-send').disabled = false;
   aiSettings = AI.loadSettings();
+  const subs = await api('/api/subjects').catch(() => []);
+  const color = subs.find(x => fold(x.name) === fold(d.subject_name))?.color || '#4f46e5';
+  const root = $('#view-doc');
+  root.style.setProperty('--accent', color); root.style.setProperty('--accent-ink', inkOn(color));
   $('#doc-title').textContent = d.name;
-  $('#doc-sub').textContent = `${d.subject_name} · ${fmtSize(d.size)} · ${d.text.length.toLocaleString('fr-FR')} caractères`;
+  renderMeta(d);
   $('#doc-back-label').textContent = d.subject_name;
   $('#doc-original').classList.toggle('hidden', !d.blob);
-  $('#ai-model').textContent = aiConfig().key ? aiConfig().model : '';
+  updateAiStatus(); applySize();
   renderReader(d.text); renderChat();
-  window.scrollTo({ top: 0 });
+  window.scrollTo({ top: 0 }); $('#doc-article').scrollTop = 0; updateProgress();
   setupPdf(d, docToken);
   if (d.summary) renderSummary('ready'); else summarize();
 }
@@ -633,7 +728,7 @@ $('#ai-config-form').onsubmit = () => {
   if (!AI.saveSettings(aiSettings)) toast('Impossible d\'enregistrer les réglages dans ce navigateur.', false);
   else toast('Assistant configuré');
   if (view === 'doc' && doc) {
-    $('#ai-model').textContent = aiConfig().key ? aiConfig().model : '';
+    updateAiStatus();
     if (!doc.summary && !aiBusy) summarize();
   }
 };
@@ -648,6 +743,7 @@ const loaders = { dashboard: loadDashboard, calendar: loadCalendar, agenda: load
 const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « enfants » : on garde « Matières » allumé
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
 function show(v, p = null) {
+  if (full.on && v !== 'doc') setFull(false);
   view = loaders[v] ? v : 'dashboard';
   param = (view === 'subject' || view === 'doc') && p != null && p !== '' ? String(p) : null;
   if ((view === 'subject' || view === 'doc') && param === null) view = 'subjects';

@@ -56,7 +56,12 @@ export const SUMMARY_REQUEST = `Fais un résumé structuré des grands points de
 3. Les définitions, formules ou dates essentielles à connaître par cœur.
 4. Une rubrique « À retenir » avec 3 points maximum.
 Reste concis.`;
-export const SUGGESTIONS = ['Explique-moi simplement la notion la plus difficile', 'Pose-moi 5 questions pour m\'entraîner', 'Quelles formules ou définitions retenir ?'];
+export const QUICK_ACTIONS = [
+  { icon: '💡', label: 'Explique-moi simplement', prompt: 'Explique-moi simplement la notion la plus difficile de ce cours, avec un exemple.' },
+  { icon: '📝', label: 'Pose-moi un quiz', prompt: 'Pose-moi 5 questions pour m\'entraîner, une à la fois. Attends ma réponse avant de corriger.' },
+  { icon: '📌', label: 'Formules à retenir', prompt: 'Quelles formules ou définitions dois-je retenir par cœur ? Liste-les clairement.' },
+  { icon: '🗂️', label: 'Fiche de révision', prompt: 'Rédige une fiche de révision d\'une page sur ce cours.' },
+];
 
 /* ------------------------------------------------------------ requêtes (fonctions pures, testables) */
 export function buildRequest(provider, { key, model, system, messages }) {

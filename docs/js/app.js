@@ -7,6 +7,8 @@ import { openPdf, mountPages } from './pdfview.js';
 import * as AI from './ai.js';
 import * as SRS from './srs.js';
 import { mdToHtml } from './md.js';
+import { busyIntervals, freeSlot, spreadSessions, prioritize } from './scheduling.js';
+import { buildIcs } from './ics-export.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -138,6 +140,8 @@ $('#move-reset').onclick = guard(async () => {
 
 /* ---------------------------------------------------------------- tableau de bord */
 async function loadDashboard() {
+  renderBackupBanner().catch(() => {});
+  renderPriorities().catch(() => {});
   renderDueCard($('#review-card-dash')).catch(() => {});
   const [t, w, subs] = await Promise.all([api('/api/today'), api(`/api/week?start=${iso(monday(new Date()))}`), api('/api/subjects')]);
   $('#today-date').textContent = fmtLong(t.date);
@@ -155,6 +159,27 @@ async function loadDashboard() {
     : '<li class="text-slate-400">Aucune</li>';
   bindSessionActions($('#view-dashboard'));
   renderMiniWeek(w);
+}
+
+/** Carte « À réviser en priorité » : retards d'abord, puis prochain cours le plus proche. */
+async function renderPriorities() {
+  const card = $('#priority-card');
+  const [a, counts] = await Promise.all([api('/api/agenda'), library.counts().catch(() => ({}))]);
+  const list = prioritize(a.sessions, todayIso()).slice(0, 5);
+  card.classList.toggle('hidden', !list.length);
+  if (!list.length) return;
+  $('#priority-sub').textContent = plural(list.length, 'matière', 'matières');
+  $('#priority-list').innerHTML = list.map((g, i) => {
+    const n = counts[fold(g.subject)] || 0;
+    const parts = [g.late ? `${plural(g.late, 'créneau', 'créneaux')} à rattraper (${fmtDur(g.lateMinutes)})` : '',
+                   g.nextTarget ? `prochain cours ${fmtShort(g.nextTarget.slice(0, 10))}` : '',
+                   g.count > g.late ? `${plural(g.count - g.late, 'créneau prévu', 'créneaux prévus')}` : ''].filter(Boolean);
+    return `<li class="prio-item" style="border-left-color:${esc(g.color)}"><span class="rank">${i + 1}</span>
+      <div class="min-w-0 flex-1"><button type="button" class="subj-link font-medium" data-subj="${esc(g.subject)}" title="Ouvrir les cours de cette matière">${esc(g.subject)}</button>
+        ${g.late ? '<span class="late">en retard</span>' : ''}<p class="text-xs text-slate-500">${esc(parts.join(' · '))}</p></div>
+      <span class="text-xs text-slate-500" title="Cours téléversés">${n ? `📎 ${n}` : 'aucun cours ajouté'}</span></li>`;
+  }).join('');
+  bindSessionActions(card);
 }
 
 function renderMiniWeek(w) {
@@ -281,6 +306,14 @@ async function loadAgenda() {
   index(a.sessions);
   const byDay = {};
   a.sessions.forEach(s => (byDay[s.day] ||= []).push(s));
+  const late = a.sessions.filter(s => s.overdue), lateBox = $('#agenda-late');
+  lateBox.classList.toggle('hidden', !late.length);
+  if (late.length) {
+    lateBox.innerHTML = `<span class="grow-text">⏰ <b>${plural(late.length, 'créneau', 'créneaux')} en retard</b> (${fmtDur(late.reduce((n, x) => n + x.minutes, 0))}).
+      Déplace-les un par un, ou laisse-moi les répartir sur les prochains jours les moins chargés.</span>
+      <button type="button" id="replan-all">Tout replacer automatiquement</button>`;
+    $('#replan-all').onclick = e => { e.target.disabled = true; replanLate().finally(() => { e.target.disabled = false; }); };
+  }
   if (!a.sessions.length) {
     $('#agenda-list').innerHTML = '<p class="text-slate-500">Aucune révision planifiée. Importez votre emploi du temps.</p>';
     return;
@@ -326,10 +359,38 @@ function bindAgendaDrag() {
   });
   bindTouchDrag(root);
 }
+const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+const weekFor = day => api(`/api/week?start=${iso(monday(parseDay(day)))}`);
+/** Déplace un créneau sur un jour : on garde son heure si elle est libre, sinon le premier créneau libre de la journée. */
 const moveSessionToDay = guard(async (s, day) => {
   if (!s || s.day === day) return;
-  await api(`/api/sessions/${s.id}`, { method: 'PATCH', json: { day, start: hhmm(s.start) } });
-  toast(`« ${s.subject} » déplacée au ${fmtShort(day)}`); await refresh();
+  const w = await weekFor(day);
+  const slot = freeSlot(busyIntervals(w, day, s.id), s.minutes,
+    { dayStart: w.day_start, dayEnd: w.day_end, prefer: hhmm(s.start), notBefore: day === todayIso() ? nowMin() : 0 });
+  await api(`/api/sessions/${s.id}`, { method: 'PATCH', json: { day, start: slot || hhmm(s.start) } });
+  toast(slot ? `« ${s.subject} » déplacée au ${fmtShort(day)} à ${slot}` : `« ${s.subject} » déplacée au ${fmtShort(day)} (journée pleine : heure conservée)`, !!slot);
+  await refresh();
+});
+
+/** « Tout replacer » : répartit les créneaux en retard sur les 14 prochains jours, les moins chargés d'abord. */
+const replanLate = guard(async () => {
+  const late = (await api('/api/agenda')).sessions.filter(s => s.overdue).sort((a, b) => a.target.localeCompare(b.target));
+  if (!late.length) return;
+  if (!confirm(`Répartir ${late.length} créneau${late.length > 1 ? 'x' : ''} en retard sur les 14 prochains jours, en commençant par les jours les moins chargés ?`)) return;
+  const weeks = {}, days = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i);
+    const k = iso(d), m = iso(monday(d));
+    const w = weeks[m] ||= await api(`/api/week?start=${m}`);
+    const l = w.load[k];
+    days.push({ day: k, load: l ? l.minutes : 0, capacity: l ? l.capacity : 180, busy: busyIntervals(w, k), notBefore: i === 0 ? nowMin() : 0 });
+  }
+  const any = Object.values(weeks)[0];
+  const r = spreadSessions(late.map(s => ({ id: s.id, minutes: s.minutes, start: hhmm(s.start) })), days, { dayStart: any.day_start, dayEnd: any.day_end });
+  for (const m of r.moves) await api(`/api/sessions/${m.id}`, { method: 'PATCH', json: { day: m.day, start: m.start } });
+  const extra = [r.over ? `${r.over} dépasse${r.over > 1 ? 'nt' : ''} la charge conseillée` : '', r.unplaced.length ? `${r.unplaced.length} sans place` : ''].filter(Boolean).join(' · ');
+  toast(`${plural(r.moves.length, 'créneau replacé', 'créneaux replacés')}${extra ? ' · ' + extra : ''}`, !r.unplaced.length);
+  await refresh();
 });
 
 /** Doigt / stylet : la souris utilise le glisser-déposer natif, le tactile passe par la poignée ⠿ (qui ne bloque pas le défilement ailleurs). */
@@ -504,6 +565,9 @@ async function loadSync() {
   warn.classList.toggle('hidden', s.persistent);
   warn.textContent = s.persistent ? '' : '⚠️ Le stockage de ce navigateur est bloqué (navigation privée ?) : tes données seront perdues à la fermeture de la page. Exporte-les avant de quitter.';
   $('#install-hint').classList.toggle('hidden', !(isIOS && !standalone));
+  const last = lsGet(BK_KEY), bl = $('#backup-last');
+  bl.className = `text-sm mb-3 ${last && ageDays(last) < 7 ? 'text-emerald-700' : 'text-amber-700'}`;
+  bl.textContent = last ? `Dernière sauvegarde : ${new Date(last).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' })}.` : '⚠️ Aucune sauvegarde faite depuis cet appareil.';
   const blocks = await api('/api/blocks');
   $('#blocks-list').innerHTML = blocks.length ? blocks.map(b => `<li class="flex items-center gap-2">⛔ ${fmtShort(b.day)} ${esc(b.start)}–${esc(b.end)} ${esc(b.label)}
     <button data-del="${b.id}" class="ml-auto text-red-600 hover:underline text-xs">Supprimer</button></li>`).join('') : '<li class="text-slate-400">Aucun blocage.</li>';
@@ -540,8 +604,8 @@ async function readFile(file) {
   if (file.size > MAX_FILE) throw new Error('Fichier trop volumineux.');
   return file.text();
 }
-function download(name, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+function download(name, text, type = 'application/json') {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
@@ -559,10 +623,58 @@ $('#ics-file').onchange = guard(async e => {
   e.target.value = '';
   toast(imported(await api('/api/upload', { method: 'POST', json: { text } }))); await refresh();
 });
-$('#btn-export').onclick = guard(async () => {
+/* ---- stockage léger du navigateur (notes, date de sauvegarde) : jamais bloquant */
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } };
+const lsDel = k => { try { localStorage.removeItem(k); } catch { /* ignoré */ } };
+const BK_KEY = 'campass-last-export', SNOOZE_KEY = 'campass-backup-snooze';
+const NOTES_KEY = 'campass-notes:v1', FREE_KEY = 'campass.feuille-blanche';      // même clé que la page feuille-blanche.html
+
+function readNotes() {
+  let days = {};
+  try { const o = JSON.parse(lsGet(NOTES_KEY) || '{}'); if (o && typeof o.days === 'object' && o.days) days = o.days; } catch { /* notes illisibles : on repart de zéro */ }
+  return { days, free: lsGet(FREE_KEY) || '' };
+}
+function cleanNotes(n) {                                    // données importées : on ne garde que des dates et du texte
+  const days = {};
+  for (const [k, v] of Object.entries(n && n.days && typeof n.days === 'object' ? n.days : {})) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(k) && typeof v === 'string' && v.trim()) days[k] = v.slice(0, 100000);
+  }
+  return { days, free: typeof (n && n.free) === 'string' ? n.free.slice(0, 500000) : '' };
+}
+function writeNotes(n) { const ok = lsSet(NOTES_KEY, JSON.stringify({ days: n.days })); return lsSet(FREE_KEY, n.free || '') && ok; }
+
+const ageDays = isoStr => (Date.now() - new Date(isoStr).getTime()) / 864e5;
+async function exportBackup() {
   const { text } = await api('/api/export');
-  download(`revisions-campass-${iso(new Date())}.json`, text);
+  const out = JSON.parse(text);
+  out.notes = readNotes();                                  // les notes voyagent avec la sauvegarde
+  download(`revisions-campass-${iso(new Date())}.json`, JSON.stringify(out, null, 2));
+  lsSet(BK_KEY, new Date().toISOString()); lsDel(SNOOZE_KEY);
   toast('Sauvegarde exportée');
+}
+$('#btn-export').onclick = guard(async () => { await exportBackup(); await loadSync(); });
+
+async function renderBackupBanner() {
+  const el = $('#backup-banner');
+  const hasData = (await api('/api/subjects')).length > 0 || Object.keys(readNotes().days).length > 0;
+  const last = lsGet(BK_KEY), age = last ? ageDays(last) : Infinity, snooze = lsGet(SNOOZE_KEY);
+  if (!hasData || age < 7 || (snooze && snooze > todayIso())) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.className = 'backup-banner';
+  el.innerHTML = `<span class="grow">💾 <b>${last ? `Dernière sauvegarde il y a ${Math.floor(age)} jours.` : 'Tu n\'as encore jamais sauvegardé tes données.'}</b>
+    Elles ne sont que sur cet appareil : si le navigateur est vidé, elles disparaissent.</span>
+    <button type="button" class="primary" id="bk-now">Sauvegarder maintenant</button>
+    <button type="button" class="quiet" id="bk-later">Plus tard</button>`;
+  $('#bk-now').onclick = guard(async () => { await exportBackup(); await renderBackupBanner(); });
+  $('#bk-later').onclick = () => { const d = new Date(); d.setDate(d.getDate() + 2); lsSet(SNOOZE_KEY, iso(d)); renderBackupBanner(); };
+}
+
+$('#btn-ics-export').onclick = guard(async () => {
+  const a = await api('/api/agenda');
+  const { text, count } = buildIcs(a.sessions, { today: todayIso(), alarmMinutes: Number($('#ics-alarm').value) });
+  if (!count) throw new Error('Aucun créneau de révision à venir à exporter.');
+  download(`revisions-campass-${iso(new Date())}.ics`, text, 'text/calendar;charset=utf-8');
+  toast(`${plural(count, 'créneau exporté', 'créneaux exportés')} : ouvre le fichier pour l'ajouter à ton calendrier`);
 });
 $('#import-file').onchange = guard(async e => {
   const f = e.target.files[0]; if (!f) return;
@@ -570,12 +682,13 @@ $('#import-file').onchange = guard(async e => {
   e.target.value = '';
   if (!confirm('Remplacer toutes les données de cet appareil par cette sauvegarde ?')) return;
   await api('/api/import', { method: 'POST', json: { text } });
+  try { const n = JSON.parse(text).notes; if (n) writeNotes(cleanNotes(n)); } catch { /* sauvegarde sans notes */ }
   toast('Sauvegarde restaurée'); await refresh();
 });
 $('#btn-reset').onclick = guard(async () => {
-  if (!confirm('Effacer toutes les données de cet appareil (planning, cours téléversés, clé de l\'assistant) ? Pense à exporter une sauvegarde avant.')) return;
+  if (!confirm('Effacer toutes les données de cet appareil (planning, cours téléversés, notes, clé de l\'assistant) ? Pense à exporter une sauvegarde avant.')) return;
   await api('/api/reset', { method: 'POST' });
-  await library.clear(); AI.clearSettings();
+  await library.clear(); AI.clearSettings(); lsDel(NOTES_KEY); lsDel(FREE_KEY); lsDel(BK_KEY); lsDel(SNOOZE_KEY);
   toast('Données effacées'); await refresh();
 });
 $('#rblock-form').onsubmit = guard(async e => {
@@ -1092,16 +1205,95 @@ function quizRender(state, msg = '') {
 $('#quiz-close').onclick = () => $('#quiz-dialog').close();
 $('#quiz-dialog').addEventListener('close', () => { quizSession++; });
 
+/* ---------------------------------------------------------------- notes (notes du jour + feuille blanche) */
+let notesTab = 'day', noteDay = '', noteTimer = null, freeTimer = null;
+const noteLabel = t => (String(t).split('\n').map(l => l.replace(/^\s*[-*]\s*(\[[ xX]\]\s*)?/, '').trim()).find(Boolean)) || '';
+
+function saveDayNote() {
+  clearTimeout(noteTimer); noteTimer = null;
+  const n = readNotes(), v = $('#note-text').value;
+  if (v.trim()) n.days[noteDay] = v; else delete n.days[noteDay];
+  $('#note-status').textContent = writeNotes(n) ? 'Enregistré' : '⚠️ Enregistrement impossible dans ce navigateur';
+  renderNoteChips();
+}
+function saveFreeNote() {
+  clearTimeout(freeTimer); freeTimer = null;
+  const ok = lsSet(FREE_KEY, $('#free-text').value);
+  $('#free-status').textContent = ok ? 'Enregistré' : '⚠️ Enregistrement impossible dans ce navigateur';
+}
+function flushNotes() { if (noteTimer) saveDayNote(); if (freeTimer) saveFreeNote(); }
+addEventListener('pagehide', flushNotes);
+
+function renderNoteChips() {
+  const days = readNotes().days;
+  const keys = Object.keys(days).filter(k => days[k].trim()).sort().reverse().slice(0, 30);
+  $('#note-days').innerHTML = keys.length ? keys.map(k => `<li><button type="button" class="note-chip ${k === noteDay ? 'on' : ''}" data-nday="${k}">
+      <b class="capitalize">${esc(fmtShort(k))}</b><small>${esc(noteLabel(days[k]) || '…')}</small></button></li>`).join('')
+    : '<li class="text-sm text-slate-400">Aucune note pour le moment.</li>';
+  $$('#note-days [data-nday]').forEach(b => b.onclick = () => gotoNoteDay(b.dataset.nday));
+}
+function gotoNoteDay(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+  flushNotes();
+  noteDay = day;
+  $('#note-date').value = day;
+  $('#note-title').textContent = day === todayIso() ? `aujourd'hui · ${fmtLong(day)}` : fmtLong(day);
+  $('#note-text').value = readNotes().days[day] || '';
+  $('#note-status').textContent = 'Enregistré';
+  renderNoteChips();
+}
+const shiftDay = (day, n) => { const d = parseDay(day); d.setDate(d.getDate() + n); return iso(d); };
+function setNotesTab(tab) {
+  flushNotes(); notesTab = tab;
+  $$('#notes-tabs [data-ntab]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ntab === tab)));
+  $('#notes-day').classList.toggle('hidden', tab !== 'day');
+  $('#notes-free').classList.toggle('hidden', tab !== 'free');
+}
+const countWords = t => (t.trim() ? t.trim().split(/\s+/).length : 0);
+function updateFreeCount() { const t = $('#free-text').value, w = countWords(t); $('#free-count').textContent = `${w} mot${w > 1 ? 's' : ''} · ${t.length} caractère${t.length > 1 ? 's' : ''}`; }
+
+$$('#notes-tabs [data-ntab]').forEach(b => b.onclick = () => setNotesTab(b.dataset.ntab));
+$('#note-prev').onclick = () => gotoNoteDay(shiftDay(noteDay, -1));
+$('#note-next').onclick = () => gotoNoteDay(shiftDay(noteDay, 1));
+$('#note-today').onclick = () => gotoNoteDay(todayIso());
+$('#note-date').onchange = e => gotoNoteDay(e.target.value);
+$('#note-text').oninput = () => { $('#note-status').textContent = 'Enregistrement…'; clearTimeout(noteTimer); noteTimer = setTimeout(saveDayNote, 400); };
+$('#free-text').oninput = () => { updateFreeCount(); $('#free-status').textContent = 'Enregistrement…'; clearTimeout(freeTimer); freeTimer = setTimeout(saveFreeNote, 400); };
+$('#note-addtask').onclick = () => {
+  const t = $('#note-text'); t.value += (t.value && !t.value.endsWith('\n') ? '\n' : '') + '- [ ] ';
+  t.focus(); t.setSelectionRange(t.value.length, t.value.length); t.oninput();
+};
+$('#note-carry').onclick = () => {
+  flushNotes();
+  const days = readNotes().days, t = $('#note-text'), have = new Set(t.value.split('\n').map(l => l.trim()));
+  const found = [];
+  for (const k of Object.keys(days).filter(k => k < noteDay && k >= shiftDay(noteDay, -14)).sort().reverse()) {
+    for (const l of days[k].split('\n')) if (/^\s*- \[ \]\s*\S/.test(l) && !have.has(l.trim()) && !found.includes(l.trim())) found.push(l.trim());
+  }
+  if (!found.length) return toast('Aucune tâche non finie à reprendre');
+  t.value += (t.value && !t.value.endsWith('\n') ? '\n' : '') + found.join('\n') + '\n';
+  t.oninput(); toast(`${plural(found.length, 'tâche reprise', 'tâches reprises')}`);
+};
+$('#free-download').onclick = () => download('feuille-blanche.txt', $('#free-text').value, 'text/plain;charset=utf-8');
+
+async function loadNotes() {
+  if (!noteDay) noteDay = todayIso();
+  $('#free-text').value = readNotes().free; updateFreeCount();
+  gotoNoteDay(noteDay);
+  setNotesTab(notesTab);
+}
+
 /* ---------------------------------------------------------------- navigation */
 async function refreshStatus() {
   const s = await api('/api/settings');
   $('#sync-status').textContent = s.last_sync ? `Sync : ${new Date(s.last_sync).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}` : 'Pas encore synchronisé';
 }
 const loaders = { dashboard: loadDashboard, calendar: loadCalendar, agenda: loadAgenda, subjects: loadSubjects, sync: loadSync,
-                  subject: loadSubject, doc: loadDoc };
+                  notes: loadNotes, subject: loadSubject, doc: loadDoc };
 const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « enfants » : on garde « Matières » allumé
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
 function show(v, p = null) {
+  flushNotes();
   if (full.on && v !== 'doc') setFull(false);
   view = loaders[v] ? v : 'dashboard';
   param = (view === 'subject' || view === 'doc') && p != null && p !== '' ? String(p) : null;

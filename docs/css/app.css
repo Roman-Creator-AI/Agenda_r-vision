@@ -252,3 +252,6 @@ body.no-scroll { overflow:hidden; }
 .drag-card.dragging { opacity: .4; }
 .is-dragging .agenda-day.droppable { border-color: #cbd5e1; border-style: dashed; }
 .agenda-day.drop-over { background: rgba(37, 99, 235, .08); border-color: #2563eb !important; border-style: solid !important; }
+.drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 2rem; min-height: 2.25rem; margin: -.25rem 0 -.25rem -.35rem; color: #94a3b8; font-size: 1.2rem; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.drag-handle:hover { color: #475569; }
+.drag-ghost { position: fixed; z-index: 60; margin: 0; pointer-events: none; opacity: .92; box-shadow: 0 12px 28px rgba(15, 23, 42, .25); transform: rotate(-1deg); }

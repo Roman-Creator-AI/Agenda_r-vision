@@ -78,6 +78,7 @@ function sessionRow(s, withDay = false, draggable = false) {
   const part = s.catchup ? ' · rattrapage' : (s.slot_count > 1 ? ` (${s.slot_index + 1}/${s.slot_count})` : '');
   const tone = s.status === 'done' ? 'opacity-60' : s.status === 'missed' ? 'bg-red-50' : 'bg-white';
   return `<li class="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-slate-200 ${tone}${draggable ? ' drag-card' : ''}" ${draggable ? `draggable="true" data-drag-sid="${esc(s.id)}" title="Glisse sur un autre jour pour déplacer"` : ''} style="border-left:5px solid ${esc(s.color)}">
+    ${draggable ? '<span class="drag-handle" aria-hidden="true" title="Maintiens et glisse vers un autre jour">⠿</span>' : ''}
     <div class="flex-1 min-w-[12rem]">
       <p class="font-medium ${s.status === 'done' ? 'line-through' : ''}"><button type="button" class="subj-link" data-subj="${esc(s.subject)}" title="Ouvrir les cours de cette matière">${esc(s.subject)}</button>${part} ${badges(s)}</p>
       <p class="text-xs text-slate-500">${withDay ? fmtShort(s.day) + ' · ' : ''}${hhmm(s.start)}–${hhmm(s.end)} (${fmtDur(s.minutes)})${chap} · prépare le cours du ${fmtShort(s.target.slice(0, 10))}</p>
@@ -320,11 +321,57 @@ function bindAgendaDrag() {
     day.ondragleave = e => { if (!day.contains(e.relatedTarget)) day.classList.remove('drop-over'); };
     day.ondrop = guard(async e => {
       e.preventDefault(); day.classList.remove('drop-over'); root.classList.remove('is-dragging');
-      const s = sessionIndex[e.dataTransfer.getData('text/plain')];
-      if (!s || s.day === day.dataset.day) return;
-      await api(`/api/sessions/${s.id}`, { method: 'PATCH', json: { day: day.dataset.day, start: hhmm(s.start) } });
-      toast(`« ${s.subject} » déplacée au ${fmtShort(day.dataset.day)}`); await refresh();
+      await moveSessionToDay(sessionIndex[e.dataTransfer.getData('text/plain')], day.dataset.day);
     });
+  });
+  bindTouchDrag(root);
+}
+const moveSessionToDay = guard(async (s, day) => {
+  if (!s || s.day === day) return;
+  await api(`/api/sessions/${s.id}`, { method: 'PATCH', json: { day, start: hhmm(s.start) } });
+  toast(`« ${s.subject} » déplacée au ${fmtShort(day)}`); await refresh();
+});
+
+/** Doigt / stylet : la souris utilise le glisser-déposer natif, le tactile passe par la poignée ⠿ (qui ne bloque pas le défilement ailleurs). */
+function bindTouchDrag(root) {
+  $$('.drag-handle', root).forEach(h => {
+    h.onpointerdown = e => {
+      if (e.pointerType === 'mouse') return;
+      const card = h.closest('[data-drag-sid]'), s = sessionIndex[card.dataset.dragSid];
+      if (!s) return;
+      e.preventDefault();
+      card.draggable = false;                                   // évite le glisser natif d'iOS en parallèle
+      h.setPointerCapture(e.pointerId);
+      const r = card.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+      const ghost = card.cloneNode(true);
+      ghost.classList.add('drag-ghost'); ghost.style.width = r.width + 'px';
+      document.body.appendChild(ghost);
+      card.classList.add('dragging'); root.classList.add('is-dragging');
+      let x = e.clientX, y = e.clientY, over = null;
+      const place = () => {
+        ghost.style.left = (x - dx) + 'px'; ghost.style.top = (y - dy) + 'px';
+        const el = document.elementFromPoint(x, y)?.closest('.agenda-day.droppable');
+        if (el !== over) { over?.classList.remove('drop-over'); over = el; over?.classList.add('drop-over'); }
+      };
+      place();
+      const auto = setInterval(() => {                           // défilement automatique près des bords de l'écran
+        const edge = 90;
+        if (y < edge) scrollBy(0, -14); else if (y > innerHeight - edge) scrollBy(0, 14); else return;
+        place();
+      }, 16);
+      h.onpointermove = ev => { x = ev.clientX; y = ev.clientY; place(); };
+      const end = async ev => {
+        clearInterval(auto);
+        h.onpointermove = h.onpointerup = h.onpointercancel = null;
+        try { h.releasePointerCapture(e.pointerId); } catch { /* déjà relâché */ }
+        const target = ev.type === 'pointerup' ? over : null;
+        ghost.remove(); card.classList.remove('dragging'); root.classList.remove('is-dragging');
+        $$('.agenda-day', root).forEach(d => d.classList.remove('drop-over'));
+        card.draggable = true;
+        if (target) await moveSessionToDay(s, target.dataset.day);
+      };
+      h.onpointerup = end; h.onpointercancel = end;
+    };
   });
 }
 

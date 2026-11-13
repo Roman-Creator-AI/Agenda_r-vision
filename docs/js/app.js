@@ -73,13 +73,13 @@ function statusButtons(s) {
     <button data-status="pending" data-sid="${id}" class="text-xs text-slate-500 underline">Annuler</button></div>`;
 }
 
-function sessionRow(s, withDay = false) {
+function sessionRow(s, withDay = false, draggable = false) {
   const chap = s.chapters.length ? ` · chap. ${s.chapters[0]}${s.chapters.length > 1 ? '–' + s.chapters[s.chapters.length - 1] : ''}` : '';
   const part = s.catchup ? ' · rattrapage' : (s.slot_count > 1 ? ` (${s.slot_index + 1}/${s.slot_count})` : '');
   const tone = s.status === 'done' ? 'opacity-60' : s.status === 'missed' ? 'bg-red-50' : 'bg-white';
-  return `<li class="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-slate-200 ${tone}" style="border-left:5px solid ${esc(s.color)}">
+  return `<li class="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-slate-200 ${tone}${draggable ? ' drag-card' : ''}" ${draggable ? `draggable="true" data-drag-sid="${esc(s.id)}" title="Glisse sur un autre jour pour déplacer"` : ''} style="border-left:5px solid ${esc(s.color)}">
     <div class="flex-1 min-w-[12rem]">
-      <p class="font-medium ${s.status === 'done' ? 'line-through' : ''}">${esc(s.subject)}${part} ${badges(s)}</p>
+      <p class="font-medium ${s.status === 'done' ? 'line-through' : ''}"><button type="button" class="subj-link" data-subj="${esc(s.subject)}" title="Ouvrir les cours de cette matière">${esc(s.subject)}</button>${part} ${badges(s)}</p>
       <p class="text-xs text-slate-500">${withDay ? fmtShort(s.day) + ' · ' : ''}${hhmm(s.start)}–${hhmm(s.end)} (${fmtDur(s.minutes)})${chap} · prépare le cours du ${fmtShort(s.target.slice(0, 10))}</p>
     </div>
     ${statusButtons(s)}
@@ -95,6 +95,15 @@ function bindSessionActions(root) {
     await refresh();
   }));
   $$('[data-move]', root).forEach(b => b.onclick = () => openMove(sessionIndex[b.dataset.move]));
+  $$('[data-subj]', root).forEach(b => b.onclick = e => { e.stopPropagation(); openSubject(b.dataset.subj, view); });
+}
+
+/** Ouvre la page « Mes cours » d'une matière (même présentation que dans Matières) ; le bouton Retour revient d'où on vient. */
+const BACK_LABEL = { subjects: 'Matières', calendar: 'Calendrier', agenda: 'Agenda de révision', dashboard: 'Tableau de bord' };
+let subjectBack = 'subjects';
+function openSubject(name, from = 'subjects') {
+  subjectBack = BACK_LABEL[from] ? from : 'subjects';
+  show('subject', name);
 }
 const index = list => list.forEach(s => sessionIndex[s.id] = s);
 
@@ -172,6 +181,7 @@ async function loadCalendar() {
   const end = new Date(weekStart); end.setDate(end.getDate() + 6);
   $('#week-title').textContent = `${weekStart.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} – ${end.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
   const rvSlots = await reminderSlots(w);
+  const docCounts = await library.counts().catch(() => ({}));
   const hours = w.day_end - w.day_start;
   const axis = [...Array(hours)].map((_, i) => `<div class="hour-line text-[10px] text-slate-400 pr-1 text-right" style="height:${HOUR_PX}px">${pad(w.day_start + i)}h</div>`).join('');
   let head = '<div></div>', cols = `<div>${axis}</div>`;
@@ -188,8 +198,10 @@ async function loadCalendar() {
     });
     w.courses.filter(c => c.start.slice(0, 10) === k).forEach(c => {
       const top = (mins(c.start) - w.day_start * 60) / 60 * HOUR_PX, h = Math.max(18, (mins(c.end) - mins(c.start)) / 60 * HOUR_PX);
-      ev.push(`<div class="ev" style="top:${top}px;height:${h}px;background:${esc(c.color)}22;border-left:4px solid ${esc(c.color)}" title="${esc(c.summary)}">
-        <b>${esc(c.subject)}</b> ${esc(c.kind)}<br>${hhmm(c.start)}–${hhmm(c.end)}${c.room ? ' · ' + esc(c.room) : ''}</div>`);
+      const nDocs = docCounts[fold(c.subject)] || 0;
+      ev.push(`<div class="ev course" role="button" tabindex="0" data-subj="${esc(c.subject)}" style="top:${top}px;height:${h}px;background:${esc(c.color)}22;border-left:4px solid ${esc(c.color)}"
+        title="${esc(c.summary)} — clique pour ouvrir / ajouter les cours de cette matière">
+        <b>${esc(c.subject)}</b> ${esc(c.kind)}${nDocs ? ` <span class="doc-count">📎 ${nDocs}</span>` : ''}<br>${hhmm(c.start)}–${hhmm(c.end)}${c.room ? ' · ' + esc(c.room) : ''}</div>`);
     });
     w.blocks.filter(b => b.day === k).forEach(b => {
       const top = ((+b.start.slice(0, 2)) * 60 + +b.start.slice(3) - w.day_start * 60) / 60 * HOUR_PX;
@@ -202,7 +214,7 @@ async function loadCalendar() {
         ? `<button class="mini" data-status="done" data-sid="${esc(s.id)}" title="Fait">✓</button> <button class="mini" data-status="missed" data-sid="${esc(s.id)}" title="Non fait">✗</button> <button class="mini" data-move="${esc(s.id)}" title="Déplacer">⇄</button>`
         : `<button class="mini" data-status="pending" data-sid="${esc(s.id)}" title="Annuler">↩</button>`;
       ev.push(`<div class="ev rev ${s.status}" draggable="true" data-sid="${esc(s.id)}" style="top:${top}px;height:${h}px;border-color:${esc(s.color)};color:${esc(s.color)}">
-        <b>${s.catchup ? '↻' : '✎'} ${esc(s.subject)}</b>${s.overloaded ? ' ⚠️' : ''}<br>${hhmm(s.start)}–${hhmm(s.end)} ${acts}</div>`);
+        <b data-subj="${esc(s.subject)}" class="subj-link" title="Ouvrir les cours de cette matière">${s.catchup ? '↻' : '✎'} ${esc(s.subject)}</b>${s.overloaded ? ' ⚠️' : ''}<br>${hhmm(s.start)}–${hhmm(s.end)} ${acts}</div>`);
     });
     cols += `<div class="week-grid border-l border-slate-200" data-day="${k}" style="height:${hours * HOUR_PX}px;background-image:repeating-linear-gradient(to bottom,#e2e8f0 0,#e2e8f0 1px,transparent 1px,transparent ${HOUR_PX}px)">${ev.join('')}</div>`;
   }
@@ -210,6 +222,9 @@ async function loadCalendar() {
     <div class="grid" style="grid-template-columns:44px repeat(7,1fr)">${cols}</div>`;
   bindSessionActions($('#calendar'));
   bindDrag(w.day_start);
+  $$('#calendar .course').forEach(el => el.onkeydown = e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSubject(el.dataset.subj, 'calendar'); }
+  });
   $$('#calendar [data-rv-slot]').forEach(el => {
     const open = () => { reviewIntent = el.dataset.rvSlot; show('doc', el.dataset.rvSlot); };
     el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
@@ -265,13 +280,52 @@ async function loadAgenda() {
   index(a.sessions);
   const byDay = {};
   a.sessions.forEach(s => (byDay[s.day] ||= []).push(s));
-  const days = Object.keys(byDay).sort();
-  $('#agenda-list').innerHTML = days.length ? days.map(k => `<div>
-      <div class="flex items-center gap-3 mb-2"><h3 class="font-medium capitalize ${k === iso(new Date()) ? 'text-blue-600' : ''}">${fmtLong(k)}</h3>
+  if (!a.sessions.length) {
+    $('#agenda-list').innerHTML = '<p class="text-slate-500">Aucune révision planifiée. Importez votre emploi du temps.</p>';
+    return;
+  }
+  // jours avec révisions + les 14 prochains jours (même vides) pour pouvoir y déposer une matière
+  const today = todayIso(), all = new Set(Object.keys(byDay));
+  for (let i = 0; i < 14; i++) { const d = new Date(); d.setDate(d.getDate() + i); all.add(iso(d)); }
+  const days = [...all].sort();
+  $('#agenda-list').innerHTML = days.map(k => {
+    const list = byDay[k] || [];
+    const droppable = k >= today;
+    return `<div class="agenda-day${droppable ? ' droppable' : ''}" data-day="${k}">
+      <div class="flex items-center gap-3 mb-2"><h3 class="font-medium capitalize ${k === today ? 'text-blue-600' : ''}">${fmtLong(k)}</h3>
       <div class="w-40">${gauge(a.load[k])}</div></div>
-      <ul class="space-y-2">${byDay[k].map(s => sessionRow(s)).join('')}</ul></div>`).join('')
-    : '<p class="text-slate-500">Aucune révision planifiée. Importez votre emploi du temps.</p>';
+      <ul class="space-y-2">${list.map(s => sessionRow(s, false, droppable && s.status === 'pending')).join('')}</ul>
+      ${list.length ? '' : '<p class="agenda-empty">Rien de prévu · dépose une matière ici</p>'}</div>`;
+  }).join('');
   bindSessionActions($('#agenda-list'));
+  bindAgendaDrag();
+}
+
+/** Glisser-déposer : on attrape une matière et on la lâche sur le jour voulu (l'heure est conservée, ⇄ « Modifier » pour l'ajuster). */
+function bindAgendaDrag() {
+  const root = $('#agenda-list');
+  $$('[data-drag-sid]', root).forEach(el => {
+    el.ondragstart = e => {
+      e.dataTransfer.setData('text/plain', el.dataset.dragSid);
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('dragging'); root.classList.add('is-dragging');
+    };
+    el.ondragend = () => {
+      el.classList.remove('dragging'); root.classList.remove('is-dragging');
+      $$('.agenda-day', root).forEach(d => d.classList.remove('drop-over'));
+    };
+  });
+  $$('.agenda-day.droppable', root).forEach(day => {
+    day.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; day.classList.add('drop-over'); };
+    day.ondragleave = e => { if (!day.contains(e.relatedTarget)) day.classList.remove('drop-over'); };
+    day.ondrop = guard(async e => {
+      e.preventDefault(); day.classList.remove('drop-over'); root.classList.remove('is-dragging');
+      const s = sessionIndex[e.dataTransfer.getData('text/plain')];
+      if (!s || s.day === day.dataset.day) return;
+      await api(`/api/sessions/${s.id}`, { method: 'PATCH', json: { day: day.dataset.day, start: hhmm(s.start) } });
+      toast(`« ${s.subject} » déplacée au ${fmtShort(day.dataset.day)}`); await refresh();
+    });
+  });
 }
 
 /* ---------------------------------------------------------------- matières */
@@ -350,7 +404,7 @@ async function loadSubjects() {
     <span class="text-xs text-slate-500">${counts[fold(s.name)] ? plural(counts[fold(s.name)], 'cours', 'cours') : ''}</span>
     <button type="button" data-back="${esc(s.name)}" class="subj-btn ml-auto">Remettre dans mes révisions</button></li>`).join('');
 
-  $$('#view-subjects [data-open]').forEach(b => b.onclick = () => show('subject', b.dataset.open));
+  $$('#view-subjects [data-open]').forEach(b => b.onclick = () => openSubject(b.dataset.open, 'subjects'));
   $$('#subjects-list [data-idle]').forEach(b => b.onclick = guard(async () => {
     await setSubjectEnabled(b.dataset.idle, false); toast(`« ${b.dataset.idle} » retirée de tes révisions`); await loadSubjects();
   }));
@@ -511,6 +565,7 @@ async function loadSubject(name) {
   const s = subs.find(x => fold(x.name) === fold(name));
   if (!s) return show('subjects');
   currentSubject = s;
+  $('#subj-back').textContent = `← ${BACK_LABEL[subjectBack]}`;
   $('#subj-dot').style.background = s.color;
   $('#subj-title').textContent = s.name;
   $('#lib-warning').classList.toggle('hidden', library.persistent);
@@ -1005,12 +1060,14 @@ function show(v, p = null) {
   param = (view === 'subject' || view === 'doc') && p != null && p !== '' ? String(p) : null;
   if ((view === 'subject' || view === 'doc') && param === null) view = 'subjects';
   $$('.view').forEach(el => el.classList.toggle('hidden', el.id !== `view-${view}`));
-  $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === (NAV_OF[view] || view)));
+  const navView = view === 'subject' ? subjectBack : (NAV_OF[view] || view);
+  $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === navView));
   $('main').classList.toggle('max-w-6xl', view !== 'doc');          // le lecteur utilise toute la largeur
   history.replaceState(null, '', `#${view}${param !== null ? '/' + encodeURIComponent(param) : ''}`);
   refresh();
 }
 $$('[data-view]').forEach(b => b.onclick = () => show(b.dataset.view));
+$('#subj-back').onclick = () => show(subjectBack);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 await backend.autoSync();            // rafraîchit en silence si un lien est enregistré et ancien
 {

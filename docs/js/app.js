@@ -295,7 +295,7 @@ async function loadAgenda() {
     return `<div class="agenda-day${droppable ? ' droppable' : ''}" data-day="${k}">
       <div class="flex items-center gap-3 mb-2"><h3 class="font-medium capitalize ${k === today ? 'text-blue-600' : ''}">${fmtLong(k)}</h3>
       <div class="w-40">${gauge(a.load[k])}</div></div>
-      <ul class="space-y-2">${list.map(s => sessionRow(s, false, droppable && s.status === 'pending')).join('')}</ul>
+      <ul class="space-y-2">${list.map(s => sessionRow(s, false, s.status === 'pending')).join('')}</ul>
       ${list.length ? '' : '<p class="agenda-empty">Rien de prévu · dépose une matière ici</p>'}</div>`;
   }).join('');
   bindSessionActions($('#agenda-list'));

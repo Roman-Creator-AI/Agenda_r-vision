@@ -81,7 +81,8 @@
 
     <!-- Agenda de révision -->
     <section id="view-agenda" class="view hidden">
-      <h2 class="font-semibold text-lg mb-4">Agenda de révision</h2>
+      <h2 class="font-semibold text-lg mb-1">Agenda de révision</h2>
+      <p class="text-xs text-slate-500 mb-4">Attrape une matière et lâche-la sur le jour où tu veux la réviser (ordinateur) ; sur téléphone, utilise « Modifier ».</p>
       <div id="review-card-agenda" class="hidden mb-4"></div>
       <div id="agenda-list" class="space-y-4"></div>
     </section>
@@ -117,7 +118,7 @@
 
     <!-- Page d'une matière : ses cours -->
     <section id="view-subject" class="view hidden max-w-3xl">
-      <button data-view="subjects" class="text-sm text-slate-500 hover:underline mb-3">← Matières</button>
+      <button id="subj-back" type="button" class="text-sm text-slate-500 hover:underline mb-3">← Matières</button>
       <div class="flex items-center gap-3 mb-1">
         <span id="subj-dot" class="w-4 h-4 rounded-full shrink-0"></span>
         <h2 id="subj-title" class="font-semibold text-xl truncate"></h2>

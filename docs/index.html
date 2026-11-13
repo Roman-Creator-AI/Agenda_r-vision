@@ -28,6 +28,7 @@
       <button data-view="calendar" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🗓️ Calendrier</button>
       <button data-view="agenda" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">📋 Agenda de révision</button>
       <button data-view="subjects" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">⚙️ Matières</button>
+      <button data-view="notes" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">📝 Notes</button>
       <button data-view="sync" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🔄 Import &amp; sauvegarde</button>
     </nav>
     <div id="sync-status" class="hidden md:block mt-6 text-xs text-slate-500"></div>
@@ -38,6 +39,7 @@
 
     <!-- Tableau de bord -->
     <section id="view-dashboard" class="view space-y-6">
+      <div id="backup-banner" class="hidden"></div>
       <div id="review-card-dash" class="hidden"></div>
       <div class="grid md:grid-cols-3 gap-4">
         <div class="md:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
@@ -55,6 +57,11 @@
           <h3 class="font-semibold mt-5 mb-2 text-sm">Prochaines révisions</h3>
           <ul id="upcoming" class="space-y-1 text-sm"></ul>
         </div>
+      </div>
+      <div id="priority-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+        <div class="flex items-baseline gap-2 mb-1"><h2 class="font-semibold">À réviser en priorité</h2><span id="priority-sub" class="text-xs text-slate-500"></span></div>
+        <p class="text-sm text-slate-500 mb-3">Les matières en retard d'abord, puis celles dont le prochain cours est le plus proche.</p>
+        <ol id="priority-list" class="space-y-2"></ol>
       </div>
       <div class="bg-white rounded-xl border border-slate-200 p-5">
         <div class="flex items-center justify-between mb-3">
@@ -82,7 +89,8 @@
     <!-- Agenda de révision -->
     <section id="view-agenda" class="view hidden">
       <h2 class="font-semibold text-lg mb-1">Agenda de révision</h2>
-      <p class="text-xs text-slate-500 mb-4">Attrape une matière et lâche-la sur le jour où tu veux la réviser (ordinateur) ; sur téléphone, utilise « Modifier ».</p>
+      <p class="text-xs text-slate-500 mb-4">Attrape une matière et lâche-la sur le jour où tu veux la réviser : à la souris, ou au doigt avec la poignée ⠿. « Modifier » reste disponible pour choisir l'heure.</p>
+      <div id="agenda-late" class="hidden agenda-late"></div>
       <div id="review-card-agenda" class="hidden mb-4"></div>
       <div id="agenda-list" class="space-y-4"></div>
     </section>
@@ -209,6 +217,42 @@
       </dialog>
     </section>
 
+    <!-- Notes : notes du jour + feuille blanche -->
+    <section id="view-notes" class="view hidden max-w-3xl">
+      <h2 class="font-semibold text-xl mb-1">Notes</h2>
+      <p class="text-sm text-slate-500 mb-4">Ce que tu dois faire pour le travail, jour après jour, et une feuille libre. Tout s'enregistre tout seul sur cet appareil.</p>
+      <div id="notes-tabs" class="seg mb-4" role="group" aria-label="Type de notes">
+        <button type="button" data-ntab="day" aria-pressed="true">📅 Notes du jour</button>
+        <button type="button" data-ntab="free" aria-pressed="false">📝 Feuille blanche</button>
+      </div>
+      <div id="notes-day">
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <button id="note-prev" type="button" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100" aria-label="Jour précédent">←</button>
+          <input id="note-date" type="date" class="border rounded-lg px-3 py-1.5 text-sm bg-white" aria-label="Jour des notes">
+          <button id="note-next" type="button" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100" aria-label="Jour suivant">→</button>
+          <button id="note-today" type="button" class="px-3 py-1.5 bg-white border rounded-lg hover:bg-slate-100 text-sm">Aujourd'hui</button>
+          <span id="note-title" class="font-medium capitalize ml-1"></span>
+        </div>
+        <textarea id="note-text" class="note-area" rows="14" spellcheck="true" aria-label="Notes du jour"
+          placeholder="Ce que je dois faire aujourd'hui…&#10;- [ ] une tâche&#10;- [x] une tâche terminée"></textarea>
+        <div class="flex flex-wrap items-center gap-2 mt-2 text-sm">
+          <button id="note-addtask" type="button" class="tool">＋ Tâche</button>
+          <button id="note-carry" type="button" class="tool" title="Reprend ici les tâches « - [ ] » des jours précédents qui ne sont pas cochées">↪ Reprendre les tâches non finies</button>
+          <span id="note-status" class="text-xs text-slate-500 ml-auto">Enregistré</span>
+        </div>
+        <h3 class="font-semibold text-sm mt-6 mb-2">Jours avec des notes</h3>
+        <ul id="note-days" class="flex flex-wrap gap-2"></ul>
+      </div>
+      <div id="notes-free" class="hidden">
+        <textarea id="free-text" class="note-area" rows="18" spellcheck="true" aria-label="Feuille blanche" placeholder="Écris ici ce que tu veux…"></textarea>
+        <div class="flex items-center gap-3 mt-2 text-sm">
+          <span id="free-count" class="text-xs text-slate-500">0 mot</span>
+          <span id="free-status" class="text-xs text-slate-500">Enregistré</span>
+          <button id="free-download" type="button" class="tool ml-auto">⬇️ Télécharger (.txt)</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Import & sauvegarde -->
     <section id="view-sync" class="view hidden space-y-6 max-w-2xl">
       <div id="storage-warning" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"></div>
@@ -237,12 +281,27 @@
         <h2 class="font-semibold mb-1">Sauvegarde</h2>
         <p class="text-sm text-slate-500 mb-3">Tes données restent dans ce navigateur, sur cet appareil. Exporte-les pour les
           garder en lieu sûr ou les retrouver sur un autre appareil. Les fichiers de cours et la clé de l'assistant IA
-          n'en font pas partie, pas plus que le suivi des rappels de mémorisation : ils restent uniquement sur cet appareil.</p>
+          n'en font pas partie, pas plus que le suivi des rappels de mémorisation : ils restent uniquement sur cet appareil. Tes notes, elles, sont incluses.</p>
+        <p id="backup-last" class="text-sm mb-3"></p>
         <div class="flex flex-wrap gap-2 items-center text-sm">
           <button id="btn-export" class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">Exporter (.json)</button>
           <label class="px-3 py-1.5 border rounded-lg cursor-pointer hover:bg-slate-50">Restaurer…
             <input id="import-file" type="file" accept=".json,application/json" class="hidden"></label>
           <button id="btn-reset" class="px-3 py-1.5 text-red-700 hover:underline ml-auto">Effacer mes données</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-1">Mes révisions dans mon calendrier</h2>
+        <p class="text-sm text-slate-500 mb-3">Télécharge tes créneaux de révision à venir au format calendrier (.ics) : ouvre le fichier et ils s'ajoutent à l'application
+          Calendrier de ton téléphone ou de ton ordinateur, avec une alerte avant chaque créneau. C'est une copie du planning à cet instant : si tu le modifies, exporte-le de nouveau
+          (les créneaux déjà ajoutés sont mis à jour, pas dupliqués, dans la plupart des calendriers).</p>
+        <div class="flex flex-wrap gap-2 items-center text-sm">
+          <button id="btn-ics-export" class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">📅 Exporter vers mon calendrier (.ics)</button>
+          <label class="text-slate-600 flex items-center gap-2">Alerte
+            <select id="ics-alarm" class="border rounded-lg px-2 py-1.5">
+              <option value="0">aucune</option><option value="15">15 min avant</option><option value="30" selected>30 min avant</option><option value="60">1 h avant</option><option value="1440">la veille</option>
+            </select></label>
         </div>
       </div>
 

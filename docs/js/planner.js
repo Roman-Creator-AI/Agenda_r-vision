@@ -6,15 +6,18 @@
 // matière ajoute des créneaux de rattrapage dans les prochains cycles, jamais aujourd'hui.
 import { sha1Hex } from './sha1.js';
 import { MIN, addDays, dayToMs, dtToMs, msToDt, hmToMin, roundHalfEven, round2 } from './dates.js';
+import { workType } from './kinds.js';
 
 export const DEFAULT_CFG = {
   dayStart: 8 * 60, dayEnd: 21 * 60, preferredStart: 18 * 60,
   capacity: 180, historyDays: 7, groupBy: 'subject', extraCap: 2,
+  examBoost: 0,          // créneaux ajoutés avant un examen (0 = comportement historique, identique à planner.py)
 };
 
 export const DEFAULT_SUBJECT = {
   color: '#2563eb', sessionMinutes: 60, chapters: 2, chaptersPerSession: 2,
   intensity: 1.0, enabled: true, backlog: 0,
+  practiceMinutes: 0,    // durée d'un créneau d'exercices (TD/TP) ; 0 = même durée que pour un cours
 };
 
 const fold = s => String(s).toLowerCase();   // équivalent pratique de str.casefold()
@@ -152,16 +155,24 @@ export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, to
     const [slots, minutes] = workload(scfg);
     let remaining = Math.max(0, scfg.backlog || 0);
     for (const [prev, nxt] of items) {
-      const targetDay = nxt.day, floorDay = prev.day;
+      // Mode examen : on ne révise pas une séance venue après un examen, et l'examen reçoit plus de créneaux, étalés sur ~2 semaines.
+      if (cfg.examBoost > 0 && workType(prev.kind) === 'exam') continue;
+      const exam = cfg.examBoost > 0 && workType(nxt.kind) === 'exam';
+      // Les exercices (TD/TP) peuvent avoir leur propre durée de créneau.
+      const practice = scfg.practiceMinutes > 0 && workType(prev.kind) === 'practice';
+      const [slots0, minutes0] = practice ? workload({ ...scfg, sessionMinutes: scfg.practiceMinutes }) : [slots, minutes];
+      const slotsN = exam ? slots0 + cfg.examBoost : slots0;
+      const targetDay = nxt.day, floorDay = exam ? addDays(targetDay, -14) : prev.day;
+      const step = exam && slotsN <= 7 ? 2 : 1;
       // -- créneaux de base
-      const per = Math.ceil(Math.max(scfg.chapters, 1) / slots);
-      for (let i = 0; i < slots; i++) {
-        const day = [addDays(targetDay, -(1 + i)), floorDay].sort().pop();      // max de deux dates ISO
+      const per = Math.ceil(Math.max(scfg.chapters, 1) / slotsN);
+      for (let i = 0; i < slotsN; i++) {
+        const day = [addDays(targetDay, -(1 + i * step)), floorDay].sort().pop();      // max de deux dates ISO
         if (day < minDay) continue;
         const first = i * per + 1, last = Math.min(first + per - 1, Math.max(scfg.chapters, 1));
         const chapters = [];
         for (let n = first; n <= last; n++) chapters.push(n);
-        wanted.push(make(scfg, nxt, day, i, minutes, slots, false, chapters));
+        wanted.push(make(scfg, nxt, day, i, minutes0, slotsN, false, chapters));
       }
       // -- rattrapages : ceux déjà connus (historique / déplacés) + ceux dus à la dette
       const retained = new Map();
@@ -190,9 +201,9 @@ export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, to
       for (const jj of indices) {
         // un rattrapage déjà vécu garde sa place ; les nouveaux ne partent pas dans le passé
         const lower = retained.has(jj) ? floorDay : catchFloor;
-        const day = [addDays(targetDay, -(1 + slots + jj)), lower].sort().pop();
+        const day = [addDays(targetDay, -(1 + slotsN + jj)), lower].sort().pop();
         if (day < minDay) continue;
-        wanted.push(make(scfg, nxt, day, jj, minutes, 0, true));
+        wanted.push(make(scfg, nxt, day, jj, minutes0, 0, true));
       }
     }
   }

@@ -282,6 +282,10 @@ body.no-scroll { overflow:hidden; }
 .work-pill { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; vertical-align: middle; }
 .work-pill.learn { background: #dbeafe; color: #1d4ed8; }
 .work-pill.practice { background: #ffedd5; color: #c2410c; }
+.exam-item { display: flex; gap: .75rem; align-items: center; padding: .6rem .75rem; border: 1px solid #e2e8f0; border-left-width: 5px; border-radius: .5rem; }
+.exam-count { font-weight: 600; font-size: .8rem; background: #f1f5f9; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+.exam-count.soon { background: #fee2e2; color: #b91c1c; }
+.work-pill.exam { background: #fee2e2; color: #b91c1c; }
 .work-pill.review { background: #e2e8f0; color: #475569; }
 .cal-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .75rem; color: #64748b; margin: 0 0 .5rem; }
 .ev.rev.work-practice { border-style: dashed; }
@@ -289,3 +293,25 @@ body.no-scroll { overflow:hidden; }
 .docs-head:first-child { margin-top: 0; }
 .docs-head small { color: #64748b; font-size: .75rem; }
 .agenda-late.hidden, .backup-banner.hidden { display: none; }
+
+/* minuteur, tâches du jour, statistiques */
+.timer-bar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; justify-content: center;
+  background: #0f172a; color: #fff; padding: .55rem 1rem; border-radius: 999px; box-shadow: 0 6px 24px #0005; max-width: calc(100vw - 24px); }
+.timer-bar.done { background: #166534; }
+.timer-bar.hidden { display: none; }
+.timer-bar .timer-clock { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.timer-bar button { font-size: .8rem; border-radius: 999px; padding: .25rem .8rem; border: 1px solid #fff6; color: #fff; }
+.timer-bar button.primary { background: #fff; color: #166534; font-weight: 600; }
+.task-row { display: flex; gap: .5rem; align-items: center; padding: .25rem 0; font-size: .9rem; cursor: pointer; }
+.task-row.done span { text-decoration: line-through; color: #94a3b8; }
+.task-row input { width: 1.1rem; height: 1.1rem; }
+.stat-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-bottom: .9rem; }
+.stat-tiles > div { background: #f8fafc; border-radius: .6rem; padding: .6rem .7rem; }
+.stat-tiles b { display: block; font-size: 1.25rem; }
+.stat-tiles small { color: #64748b; font-size: .7rem; }
+.stat-bars { display: grid; gap: .35rem; font-size: .8rem; }
+.stat-bars li { display: grid; grid-template-columns: minmax(5rem, 9rem) 1fr 3.5rem; gap: .5rem; align-items: center; }
+.stat-bars .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-bars .bar { background: #f1f5f9; border-radius: 4px; height: .6rem; overflow: hidden; }
+.stat-bars .bar i { display: block; height: 100%; }
+.stat-bars .v { text-align: right; color: #64748b; }

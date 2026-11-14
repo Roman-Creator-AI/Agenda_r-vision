@@ -134,3 +134,51 @@ test('export .ics : « Apprendre » ou « Exercices » selon la séance révisé
   assert.match(text, /SUMMARY:✏️ Refaire les exercices : Maths/);
   assert.match(text.replace(/\r\n /g, ''), /avant le TD du/);                      // les lignes longues sont repliées (RFC 5545)
 });
+
+// ---------------------------------------------------------------- statistiques
+import { cleanLog, weekByDay, streak, doneRate, mondayOf } from '../docs/js/stats.js';
+test('statistiques : semaine par matière, série de jours, taux de créneaux faits', () => {
+  const log = cleanLog({ a: { d: '2026-11-14', subject: 'Maths', minutes: 60 }, b: { d: '2026-11-13', subject: 'Maths', minutes: 30 },
+    c: { d: '2026-11-12', subject: 'SIP', minutes: 45 }, d: { d: '2026-11-08', subject: 'SIP', minutes: 90 }, bad: { d: 'x', subject: 'Z', minutes: 5 } });
+  assert.equal(Object.keys(log).length, 4);
+  assert.equal(mondayOf('2026-11-14'), '2026-11-09');                                    // samedi → lundi
+  const w = weekByDay(log, '2026-11-14');
+  assert.equal(w.total, 135);
+  assert.deepEqual(w.subjects, [{ subject: 'Maths', minutes: 90 }, { subject: 'SIP', minutes: 45 }]);
+  assert.equal(streak(log, '2026-11-14'), 3);                                            // 12, 13, 14
+  assert.equal(streak(log, '2026-11-15'), 3);                                            // pas encore fait aujourd'hui : la série tient
+  assert.equal(streak(log, '2026-11-17'), 0);
+  const r = doneRate([{ status: 'done', day: '2026-11-13' }, { status: 'pending', day: '2026-11-13' }, { status: 'pending', day: '2026-11-20' }, { status: 'missed', day: '2026-11-12' }], '2026-11-14');
+  assert.deepEqual(r, { done: 1, due: 3, pct: 33 });
+  assert.equal(doneRate([], '2026-11-14').pct, null);
+});
+
+// ---------------------------------------------------------------- mode examen et durée des TD
+import { plan, DEFAULT_CFG } from '../docs/js/planner.js';
+import { examNoun } from '../docs/js/kinds.js';
+test('examen : plus de créneaux avant l\'examen, jamais après ; 0 = comportement inchangé', () => {
+  assert.equal(examNoun('Examen'), 'l\'examen'); assert.equal(examNoun('DS'), 'le DS');
+  assert.equal(DEFAULT_CFG.examBoost, 0);
+});
+const crs = (kind, day, h = '09:00', e = '11:00') => ({ uid: `${kind}${day}`, subject: 'Maths', kind, start: `${day}T${h}`, end: `${day}T${e}`, room: '', summary: '' });
+const sub = { maths: { name: 'Maths', sessionMinutes: 60, chapters: 2, chaptersPerSession: 2, intensity: 1, enabled: true, backlog: 0 } };
+const run = (courses, cfg, subj = sub) => plan(courses, subj, {}, [], { ...DEFAULT_CFG, ...cfg }, '2026-11-01');
+
+test('mode examen : plus de créneaux avant l\'examen, et plus de révision après', () => {
+  const cs = [crs('CM', '2026-11-16'), crs('Examen', '2026-11-30'), crs('CM', '2026-12-07')];
+  const off = run(cs, { examBoost: 0 }), on = run(cs, { examBoost: 4 });
+  const forExam = l => l.filter(s => s.targetStart.startsWith('2026-11-30') && !s.catchup);
+  assert.ok(forExam(on).length === forExam(off).length + 4);
+  assert.ok(forExam(on).every(s => s.day >= '2026-11-16' && s.day < '2026-11-30'));
+  assert.equal(on.filter(s => s.targetStart.startsWith('2026-12-07')).length, 0);        // pas de révision d'un examen déjà passé
+  assert.ok(off.filter(s => s.targetStart.startsWith('2026-12-07')).length > 0);
+});
+test('durée des créneaux de TD propre à la matière (0 = identique au cours)', () => {
+  const cs = [crs('TD', '2026-11-10'), crs('CM', '2026-11-17'), crs('CM', '2026-11-24')];
+  const base = run(cs, {}), tweaked = run(cs, {}, { maths: { ...sub.maths, practiceMinutes: 30 } });
+  const dur = l => l.filter(s => s.targetStart.startsWith('2026-11-17')).map(s => s.minutes);
+  assert.ok(dur(base).every(m => m === 60));
+  assert.ok(dur(tweaked).every(m => m === 30));                                           // TD → CM : exercices à 30 min
+  assert.deepEqual(base.filter(s => s.targetStart.startsWith('2026-11-24')).map(s => s.minutes),
+                   tweaked.filter(s => s.targetStart.startsWith('2026-11-24')).map(s => s.minutes));   // CM → CM inchangé
+});

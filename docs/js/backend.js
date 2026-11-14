@@ -1,7 +1,7 @@
 // « Backend » exécuté dans le navigateur : mêmes routes et mêmes réponses JSON que l'API Flask
 // (app.py), mais les données vivent dans le localStorage de l'appareil.
 import { DEFAULT_CFG, DEFAULT_SUBJECT, plan, dailyLoad, workload, consecutiveOccurrences } from './planner.js';
-import { workOf } from './kinds.js';
+import { workOf, workType } from './kinds.js';
 import { DAY, addDays, dayToMs, dtToMs, isDay, todayLocal, weekday, pad2 } from './dates.js';
 import { IcsError, fetchICS, parseICS } from './ics.js';
 
@@ -27,7 +27,7 @@ const localIso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.get
 export async function createBackend({ store, today = () => todayLocal(), now = () => new Date(),
                                       fetchFn = globalThis.fetch, cfg = {}, timezone = 'Europe/Paris' } = {}) {
   const { sha1Hex } = await import('./sha1.js');
-  const CFG = { ...DEFAULT_CFG, ...cfg };
+  const CFG = { ...DEFAULT_CFG, examBoost: 4, ...cfg };           // 4 créneaux de plus avant un examen
   const AUTO_REFRESH_MINUTES = cfg.autoRefreshMinutes ?? 60;
   const S = () => store.state;
 
@@ -40,7 +40,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     for (const s of Object.values(S().subjects)) {
       out[s.name] = { name: s.name, color: s.color, sessionMinutes: s.session_minutes, chapters: s.chapters,
                       chaptersPerSession: s.chapters_per_session, intensity: s.intensity,
-                      enabled: !!s.enabled, backlog: s.backlog };
+                      enabled: !!s.enabled, backlog: s.backlog, practiceMinutes: s.practice_minutes || 0 };
     }
     return out;
   }
@@ -107,7 +107,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     slot_index: s.slotIndex, slot_count: s.slotCount, chapters: s.chapters,
     status: s.status, done: s.done, catchup: s.catchup, moved: s.moved, overloaded: s.overloaded,
     overdue: s.day < today() && s.status === 'pending',
-    work: workOf(s.src ? s.src.prev.kind : ''),                                // 'learn' | 'practice' | 'review'
+    work: s.src && workType(s.src.nxt.kind) === 'exam' ? 'exam' : workOf(s.src ? s.src.prev.kind : ''),   // 'learn' | 'practice' | 'review' | 'exam'
     source_kind: s.src ? s.src.prev.kind || '' : '', source_day: s.src ? s.src.prev.start.slice(0, 10) : null,
     target_kind: s.src ? s.src.nxt.kind || '' : '',
     custom_minutes: !!(S().states[s.sid] && S().states[s.sid].minutes),     // durée fixée à la main
@@ -141,7 +141,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
         S().subjects[n] = { name: n, color: colorFor(n, sha1Hex), ...{
           session_minutes: DEFAULT_SUBJECT.sessionMinutes, chapters: DEFAULT_SUBJECT.chapters,
           chapters_per_session: DEFAULT_SUBJECT.chaptersPerSession, intensity: DEFAULT_SUBJECT.intensity,
-          enabled: 1, backlog: 0 } };
+          enabled: 1, backlog: 0, practice_minutes: 0 } };
       }
     }
   }
@@ -306,7 +306,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       const fields = {};
       try {
         const rules = { session_minutes: [toInt, 5, 480], chapters: [toInt, 1, 60], chapters_per_session: [toInt, 1, 30],
-                        intensity: [toFloat, 0.25, 5.0], backlog: [toInt, 0, 99] };
+                        intensity: [toFloat, 0.25, 5.0], backlog: [toInt, 0, 99], practice_minutes: [toInt, 0, 480] };
         for (const [key, [cast, lo, hi]] of Object.entries(rules)) {
           if (!(key in body)) continue;
           const v = cast(body[key]);
@@ -323,6 +323,19 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       if (!key || !Object.keys(fields).length) throw err(404, 'Matière introuvable.');
       Object.assign(S().subjects[key], fields); store.save();
       return { ok: true };
+    }
+    if (method === 'GET' && p === '/api/exams') {              // examens à venir : compte à rebours + avancement des révisions
+      const { sessions, subjects } = buildPlan(), t = today(), seen = new Set();
+      return allCourses().filter(c => workType(c.kind) === 'exam' && c.start.slice(0, 10) >= t)
+        .sort((a, b) => a.start.localeCompare(b.start))
+        .filter(c => { const k = `${fold(c.subject)}|${c.start.slice(0, 10)}`; return seen.has(k) ? false : (seen.add(k), true); })
+        .map(c => {
+          const mine = sessions.filter(s => s.src && s.src.nxt.start === c.start && fold(s.subject) === fold(c.subject) && s.status !== 'missed');
+          const day = c.start.slice(0, 10), key = findSubject(c.subject);
+          return { subject: c.subject, color: (subjects[key] || {}).color || '#64748b', kind: c.kind, day, start: c.start, end: c.end, room: c.room || '',
+                   days_left: Math.round((dayToMs(day) - dayToMs(t)) / DAY), sessions_total: mine.length, sessions_done: mine.filter(s => s.done).length,
+                   minutes_left: mine.filter(s => !s.done).reduce((n, s) => n + s.minutes, 0) };
+        });
     }
     if (method === 'GET' && p === '/api/blocks') {
       return [...S().blocks].sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start));

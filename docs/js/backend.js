@@ -2,6 +2,7 @@
 // (app.py), mais les données vivent dans le localStorage de l'appareil.
 import { DEFAULT_CFG, DEFAULT_SUBJECT, plan, dailyLoad, workload, consecutiveOccurrences } from './planner.js';
 import { workOf, workType } from './kinds.js';
+import { addRating, summary as confSummary, intensityFactor } from './confidence.js';
 import { DAY, addDays, dayToMs, dtToMs, isDay, todayLocal, weekday, pad2 } from './dates.js';
 import { IcsError, fetchICS, parseICS } from './ics.js';
 
@@ -30,6 +31,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
   const CFG = { ...DEFAULT_CFG, examBoost: 4, ...cfg };           // 4 créneaux de plus avant un examen
   const AUTO_REFRESH_MINUTES = cfg.autoRefreshMinutes ?? 60;
   const S = () => store.state;
+  const confOf = name => { const k = Object.keys(S().confidence || {}).find(x => fold(x) === fold(name)); return k ? S().confidence[k] : []; };
 
   const err = (status, msg) => new ApiError(status, msg);
   const findSubject = name => Object.keys(S().subjects).find(k => fold(k) === fold(name));
@@ -41,6 +43,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       out[s.name] = { name: s.name, color: s.color, sessionMinutes: s.session_minutes, chapters: s.chapters,
                       chaptersPerSession: s.chapters_per_session, intensity: s.intensity,
                       enabled: !!s.enabled, backlog: s.backlog, practiceMinutes: s.practice_minutes || 0 };
+      out[s.name].intensity = s.intensity * intensityFactor(confOf(s.name));        // matière fragile : un peu plus de temps
     }
     return out;
   }
@@ -298,7 +301,9 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       return Object.values(S().subjects).sort((a, b) => fold(a.name).localeCompare(fold(b.name))).map(s => {
         const [slots, minutes] = workload({ chapters: s.chapters, chaptersPerSession: s.chapters_per_session,
                                             sessionMinutes: s.session_minutes, intensity: s.intensity });
-        return { ...s, slots, slot_minutes: minutes, total_minutes: slots * minutes, debt_minutes: s.backlog * minutes };
+        const cf = confSummary(confOf(s.name));
+        return { ...s, slots, slot_minutes: minutes, total_minutes: slots * minutes, debt_minutes: s.backlog * minutes,
+                 confidence: cf.avg, confidence_n: cf.n, confidence_level: cf.level };
       });
     }
     if (method === 'PUT' && p === '/api/subjects') {
@@ -408,6 +413,45 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       ensureSubjects([subject]);
       store.save();
       return { ok: true, occurrences: customCourseOccurrences(course).length };
+    }
+    if (method === 'GET' && p === '/api/courses-range') {          // tous les cours d'une période (pour le partage)
+      const from = isDay(q.get('from')) ? q.get('from') : addDays(today(), -7), to = isDay(q.get('to')) ? q.get('to') : addDays(from, 60);
+      const courses = allCourses().filter(c => c.start.slice(0, 10) >= from && c.start.slice(0, 10) <= to)
+        .map(c => ({ subject: c.subject, kind: c.kind || '', start: c.start, end: c.end, room: c.room || '' })).sort((a, b) => a.start.localeCompare(b.start));
+      return { courses, colors: Object.fromEntries(Object.values(S().subjects).map(s => [s.name, s.color])) };
+    }
+    if (method === 'DELETE' && (m = p.match(/^\/api\/shared-courses\/(.*)$/))) {    // retire tous les cours reçus d'un camarade
+      const name = decodeURIComponent(m[1]), before = S().custom_courses.length;
+      if (!name) throw err(400, 'Nom manquant.');
+      S().custom_courses = S().custom_courses.filter(c => c.from_name !== name);
+      store.save();
+      return { ok: true, removed: before - S().custom_courses.length };
+    }
+    if (method === 'POST' && p === '/api/shared-courses') {       // cours d'un camarade : ajoutés comme séances uniques, sans doublon
+      const from = String(body.from_name || '').trim().slice(0, 40) || 'Un camarade', seen = new Set(allCourses().map(c => `${fold(c.subject)}|${c.start}|${c.end}`));
+      let added = 0; const subjects = new Set();
+      for (const c of Array.isArray(body.courses) ? body.courses.slice(0, 1500) : []) {
+        const k = `${fold(c.subject)}|${c.start}|${c.end}`;
+        if (!c || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(c.start) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(c.end) || c.end <= c.start || c.start.slice(0, 10) !== c.end.slice(0, 10) || !String(c.subject || '').trim() || seen.has(k)) continue;
+        seen.add(k);
+        S().custom_courses.push({ id: S().next_item_id++, subject: String(c.subject).trim().slice(0, 120), kind: String(c.kind || '').slice(0, 30), room: String(c.room || '').slice(0, 120),
+                                  from_name: from, start: c.start.slice(11), end: c.end.slice(11), frequency: 'once', weekdays: [], every: 1, from: c.start.slice(0, 10), until: '' });
+        subjects.add(String(c.subject).trim().slice(0, 120)); added++;
+      }
+      if (S().custom_courses.length > 2000) throw err(400, 'Trop de cours ajoutés à la main (2000 maximum).');
+      ensureSubjects([...subjects]);
+      store.save();
+      return { ok: true, added, skipped: (Array.isArray(body.courses) ? body.courses.length : 0) - added };
+    }
+    if (method === 'POST' && p === '/api/confidence') {            // note de confiance 1 (fragile) à 3 (solide) pour une matière
+      const key = findSubject(body.subject), level = Number(body.level);
+      if (!key) throw err(404, 'Matière introuvable.');
+      if (![1, 2, 3].includes(level)) throw err(400, 'Niveau invalide (1 à 3).');
+      S().confidence = S().confidence || {};
+      S().confidence[key] = addRating(S().confidence[key], level, today());
+      store.save();
+      const cf = confSummary(S().confidence[key]);
+      return { ok: true, level: cf.level, avg: cf.avg, n: cf.n };
     }
     if (method === 'DELETE' && (m = p.match(/^\/api\/custom-courses\/(\d+)$/))) {
       S().custom_courses = S().custom_courses.filter(c => c.id !== Number(m[1])); store.save();

@@ -9,7 +9,10 @@ import * as SRS from './srs.js';
 import { mdToHtml } from './md.js';
 import { busyIntervals, freeSlot, spreadSessions, prioritize } from './scheduling.js';
 import { buildIcs } from './ics-export.js';
-import { cleanLog, weekByDay, streak, doneRate } from './stats.js';
+import { cleanLog, weekByDay, streak, doneRate, mondayOf, challenges, weekRecap, recapText } from './stats.js';
+import { cleanCards, addCards, dueCards, gradeCard, cardsRequest, parseCards, recallRequest } from './cards.js';
+import { LEVELS } from './confidence.js';
+import { buildShare, parseShare, newCourses, encodeShare, decodeShare } from './share.js';
 import { WORK, workType, examNoun, kindNoun, unitRange, guessTopic } from './kinds.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -113,8 +116,10 @@ function bindSessionActions(root) {
   $$('[data-status]', root).forEach(b => b.onclick = guard(async () => {
     const r = await api(`/api/sessions/${b.dataset.sid}`, { method: 'PATCH', json: { status: b.dataset.status } });
     logSession(b.dataset.sid, b.dataset.status); stopTimerFor(b.dataset.sid);
+    const wasDone = b.dataset.status === 'done' && sessionIndex[b.dataset.sid];
     if (b.dataset.status === 'missed') toast(`Reporté au cycle suivant · retard de la matière : ${r.backlog}`);
     await refresh();
+    if (wasDone) askConfidence(wasDone.subject);
   }));
   $$('[data-move]', root).forEach(b => b.onclick = () => openMove(sessionIndex[b.dataset.move]));
   $$('[data-subj]', root).forEach(b => b.onclick = e => { e.stopPropagation(); openSubject(b.dataset.subj, view); });
@@ -164,6 +169,7 @@ async function loadDashboard() {
   renderBackupBanner().catch(() => {});
   renderPriorities().catch(() => {});
   renderExams().catch(() => {});
+  renderCardsCard().catch(() => {});
   renderTasks();
   renderStats().catch(() => {});
   renderDueCard($('#review-card-dash')).catch(() => {});
@@ -211,14 +217,14 @@ function renderTimer() {
       bar.className = 'timer-bar done'; bar.innerHTML = `<span>⏰ <b>${esc(t.subject)}</b> : c'est terminé !</span>
         <button type="button" class="primary" id="tm-done">✓ Fait</button><button type="button" class="quiet" id="tm-stop">Pas fini</button>`;
       clearInterval(timerTick); timerTick = null;
-      if (!t.notified) { lsSet(TIMER_KEY, JSON.stringify({ ...t, notified: true })); toast(`⏰ ${t.subject} : temps écoulé`); }
+      if (!t.notified) { lsSet(TIMER_KEY, JSON.stringify({ ...t, notified: true })); toast(`⏰ ${t.subject} : temps écoulé`); notify('⏰ Temps écoulé', t.subject, 'timer'); }
     }
     $('#tm-stop').onclick = () => { lsDel(TIMER_KEY); renderTimer(); };
     const d = $('#tm-done');
     if (d) d.onclick = guard(async () => {
       await api(`/api/sessions/${t.sid}`, { method: 'PATCH', json: { status: 'done' } });
       if (!sessionIndex[t.sid]) sessionIndex[t.sid] = { id: t.sid, subject: t.subject, minutes: t.minutes };
-      logSession(t.sid, 'done'); lsDel(TIMER_KEY); renderTimer(); toast('Créneau marqué comme fait'); await refresh();
+      logSession(t.sid, 'done'); lsDel(TIMER_KEY); renderTimer(); toast('Créneau marqué comme fait'); await refresh(); askConfidence(t.subject);
     });
   };
   paint(); if (t.end > Date.now()) timerTick = setInterval(paint, 1000);
@@ -241,20 +247,6 @@ function renderTasks() {
     ls[i] = `${m[1]}[${c.checked ? 'x' : ' '}] ${m[3]}`; n.days[day] = ls.join('\n');
     writeNotes(n); renderTasks();
   });
-}
-
-/** Carte « Statistiques » : heures de la semaine par matière, taux de créneaux faits, série de jours. */
-async function renderStats() {
-  const card = $('#stats-card'), a = await api('/api/agenda'), today = todayIso(), log = readLog();
-  const wk = weekByDay(log, today), rate = doneRate(a.sessions, today), st = streak(log, today);
-  card.classList.toggle('hidden', !wk.total && !rate.done && !st);
-  const max = Math.max(1, ...wk.subjects.map(x => x.minutes));
-  const color = Object.fromEntries(a.sessions.map(s => [s.subject, s.color]));
-  $('#stats-body').innerHTML = `<div class="stat-tiles">
-      <div><b>${fmtDur(wk.total)}</b><small>révisées cette semaine</small></div>
-      <div><b>${rate.pct === null ? '–' : rate.pct + ' %'}</b><small>créneaux faits (${rate.done}/${rate.due})</small></div>
-      <div><b>${st} 🔥</b><small>${st > 1 ? 'jours d\'affilée' : 'jour d\'affilée'}</small></div></div>
-    <ul class="stat-bars">${wk.subjects.map(x => `<li><span class="n">${esc(x.subject)}</span><span class="bar"><i style="width:${Math.round(100 * x.minutes / max)}%;background:${esc(color[x.subject] || '#64748b')}"></i></span><span class="v">${fmtDur(x.minutes)}</span></li>`).join('')}</ul>`;
 }
 
 /** Carte « Examens à venir » : compte à rebours et avancement des révisions. */
@@ -602,6 +594,7 @@ async function loadSubjects() {
         <button type="button" data-open="${esc(s.name)}" class="subj-btn primary">Mes cours</button>
         <button type="button" data-idle="${esc(s.name)}" class="subj-btn quiet" title="Plus de créneaux ni de rappels pour cette matière">Ne plus réviser</button>
       </div>
+      ${confLine(s)}
       <details class="subj-settings"><summary>Réglages du planning</summary>
         <div class="grid grid-cols-2 gap-3">
           ${num('session_minutes', 'Durée d\'une session (min)', s.session_minutes, 5, 480, 5)}
@@ -693,10 +686,15 @@ async function loadSync() {
     <button data-del="${b.id}" class="ml-auto text-red-600 hover:underline text-xs">Supprimer</button></li>`).join('') : '<li class="text-slate-400">Aucun blocage hebdomadaire.</li>';
   $$('#rblocks-list [data-del]').forEach(b => b.onclick = guard(async () => { await api(`/api/recurring-blocks/${b.dataset.del}`, { method: 'DELETE' }); await loadSync(); }));
 
-  const courses = await api('/api/custom-courses');
-  $('#courses-list').innerHTML = courses.length ? courses.map(c => `<li class="flex items-center gap-2">📘 <b>${esc(c.subject)}</b> ${esc(c.kind)} ${esc(c.start)}–${esc(c.end)}
+  const all = await api('/api/custom-courses');
+  const courses = all.filter(c => !c.from_name), shared = {};
+  all.filter(c => c.from_name).forEach(c => { shared[c.from_name] = (shared[c.from_name] || 0) + 1; });
+  const sharedHtml = Object.entries(shared).map(([n, k]) => `<li class="flex items-center gap-2">👥 <b>${esc(n)}</b> <span class="text-xs text-slate-500">${plural(k, 'cours reçu', 'cours reçus')}</span>
+    <button data-unshare="${esc(n)}" class="ml-auto text-red-600 hover:underline text-xs">Retirer</button></li>`).join('');
+  $('#courses-list').innerHTML = sharedHtml + (courses.length ? courses.map(c => `<li class="flex items-center gap-2">📘 <b>${esc(c.subject)}</b> ${esc(c.kind)} ${esc(c.start)}–${esc(c.end)}
     <span class="text-xs text-slate-500">${esc(courseFreq(c))}</span>
-    <button data-del="${c.id}" class="ml-auto text-red-600 hover:underline text-xs">Supprimer</button></li>`).join('') : '<li class="text-slate-400">Aucun cours ajouté.</li>';
+    <button data-del="${c.id}" class="ml-auto text-red-600 hover:underline text-xs">Supprimer</button></li>`).join('') : (sharedHtml ? '' : '<li class="text-slate-400">Aucun cours ajouté.</li>'));
+  $$('#courses-list [data-unshare]').forEach(b => b.onclick = guard(async () => { await api(`/api/shared-courses/${encodeURIComponent(b.dataset.unshare)}`, { method: 'DELETE' }); await loadSync(); }));
   $$('#courses-list [data-del]').forEach(b => b.onclick = guard(async () => { await api(`/api/custom-courses/${b.dataset.del}`, { method: 'DELETE' }); await loadSync(); }));
 }
 
@@ -772,7 +770,7 @@ async function exportBackup() {
   const { text } = await api('/api/export');
   const out = JSON.parse(text);
   out.notes = readNotes();                                  // les notes voyagent avec la sauvegarde
-  out.stats = readLog();
+  out.stats = readLog(); out.goal = readGoal(); out.friends = readFriends();
   download(`revisions-campass-${iso(new Date())}.json`, JSON.stringify(out, null, 2));
   lsSet(BK_KEY, new Date().toISOString()); lsDel(SNOOZE_KEY);
   toast('Sauvegarde exportée');
@@ -806,13 +804,13 @@ $('#import-file').onchange = guard(async e => {
   e.target.value = '';
   if (!confirm('Remplacer toutes les données de cet appareil par cette sauvegarde ?')) return;
   await api('/api/import', { method: 'POST', json: { text } });
-  try { const j = JSON.parse(text); if (j.notes) writeNotes(cleanNotes(j.notes)); if (j.stats) writeLog(cleanLog(j.stats)); } catch { /* sauvegarde sans notes */ }
+  try { const j = JSON.parse(text); if (j.notes) writeNotes(cleanNotes(j.notes)); if (j.stats) writeLog(cleanLog(j.stats)); if (j.goal) lsSet(GOAL_KEY, String(Math.round(Number(j.goal)) || 0)); if (j.friends && typeof j.friends === 'object') lsSet(FRIENDS_KEY, JSON.stringify(j.friends)); } catch { /* sauvegarde sans notes */ }
   toast('Sauvegarde restaurée'); await refresh();
 });
 $('#btn-reset').onclick = guard(async () => {
   if (!confirm('Effacer toutes les données de cet appareil (planning, cours téléversés, notes, clé de l\'assistant) ? Pense à exporter une sauvegarde avant.')) return;
   await api('/api/reset', { method: 'POST' });
-  await library.clear(); AI.clearSettings(); lsDel(NOTES_KEY); lsDel(FREE_KEY); lsDel(STATS_KEY); lsDel(TIMER_KEY); lsDel(BK_KEY); lsDel(SNOOZE_KEY);
+  await library.clear(); AI.clearSettings(); lsDel(NOTES_KEY); lsDel(FREE_KEY); lsDel(STATS_KEY); lsDel(TIMER_KEY); lsDel(GOAL_KEY); lsDel(GOALHIT_KEY); lsDel(FRIENDS_KEY); lsDel(NAME_KEY); lsDel(BK_KEY); lsDel(SNOOZE_KEY);
   toast('Données effacées'); await refresh();
 });
 $('#rblock-form').onsubmit = guard(async e => {
@@ -1437,6 +1435,256 @@ const loaders = { dashboard: loadDashboard, calendar: loadCalendar, agenda: load
                   notes: loadNotes, subject: loadSubject, doc: loadDoc };
 const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « enfants » : on garde « Matières » allumé
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
+/* ---------------------------------------------------------------- fiches mémoire */
+$$('[data-close]').forEach(b => b.onclick = () => $(`#${b.dataset.close}`).close());
+const aiReady = () => !!aiConfig().key;
+const saveCards = async cards => { doc.cards = cards; await library.update(doc.id, { cards }); };
+
+async function openDeck() {
+  if (!doc) return;
+  $('#deck-title').textContent = `Fiches · ${doc.name}`;
+  $('#deck-gen').disabled = !aiReady(); $('#deck-gen').title = aiReady() ? '' : 'Ajoute d\'abord ta clé API dans les réglages de l\'assistant';
+  renderDeck(); if (!$('#deck-dialog').open) $('#deck-dialog').showModal();
+}
+function renderDeck(msg = '') {
+  const cards = cleanCards(doc.cards), today = todayIso(), due = cards.filter(c => c.srs.due <= today).length;
+  $('#deck-count').textContent = plural(cards.length, 'fiche', 'fiches');
+  $('#deck-study').disabled = !due; $('#deck-study').textContent = due ? `▶ Réviser (${due} à revoir)` : '▶ Rien à revoir aujourd\'hui';
+  $('#deck-msg').textContent = msg || (cards.length ? '' : 'Aucune fiche pour l\'instant : fais-les créer par l\'IA à partir du document, ou écris les tiennes.');
+  $('#deck-list').innerHTML = cards.map(c => `<li><div class="min-w-0"><b>${esc(c.q)}</b><small>${esc(c.a)}</small><small>prochain rappel : ${esc(SRS.dueLabel(c.srs.due, today))}</small></div>
+    <button type="button" data-delcard="${esc(c.id)}" title="Supprimer cette fiche">Supprimer</button></li>`).join('');
+  $$('#deck-list [data-delcard]').forEach(b => b.onclick = guard(async () => { await saveCards(cleanCards(doc.cards).filter(c => c.id !== b.dataset.delcard)); renderDeck(); }));
+}
+$('#doc-cards').onclick = guard(openDeck);
+$('#deck-form').onsubmit = guard(async e => {
+  e.preventDefault();
+  const r = addCards(doc.cards, [{ q: $('#deck-q').value, a: $('#deck-a').value }], todayIso());
+  if (!r.added) return renderDeck('Cette question existe déjà dans les fiches.');
+  await saveCards(r.cards); e.target.reset(); renderDeck('Fiche ajoutée.');
+});
+$('#deck-gen').onclick = guard(async () => {
+  const btn = $('#deck-gen'); btn.disabled = true; renderDeck('L\'IA lit le document et écrit les fiches…');
+  const d = doc;
+  try {
+    const known = cleanCards(d.cards).map(c => c.q);
+    const text = await AI.ask(aiConfig(), { system: aiContext(), messages: [{ role: 'user', content: cardsRequest(10, known) }] });
+    const fresh = parseCards(text);
+    if (!fresh) throw new Error('L\'IA n\'a pas renvoyé de fiches exploitables : réessaie.');
+    const r = addCards(d.cards, fresh, todayIso());
+    await saveCards(r.cards); renderDeck(r.added ? `${plural(r.added, 'fiche créée', 'fiches créées')}. Elles sont à apprendre dès aujourd'hui.` : 'Ces fiches existaient déjà : relance pour en obtenir de nouvelles.');
+  } catch (e) { renderDeck(e.message); } finally { btn.disabled = !aiReady(); }
+});
+$('#deck-study').onclick = () => { $('#deck-dialog').close(); startFlash(dueCards([{ id: doc.id, subject_name: doc.subject_name, name: doc.name, cards: doc.cards }], todayIso())); };
+
+/* séance de fiches : question → réponse → note (oublié / difficile / bien / facile) */
+let flash = null;
+function startFlash(list) {
+  if (!list.length) return toast('Aucune fiche à revoir');
+  flash = { q: list.slice(0, 30), i: 0, done: 0, show: false, retried: new Set() };
+  $('#flash-dialog').showModal(); flashRender();
+}
+function flashRender() {
+  const f = flash, el = $('#flash-body'), today = todayIso();
+  if (f.i >= f.q.length) {
+    $('#flash-count').textContent = '';
+    el.innerHTML = `<p class="quiz-score">🎉 ${plural(f.done, 'fiche revue', 'fiches revues')}</p><p>Les prochains rappels sont programmés : tu n'as rien d'autre à faire pour l'instant.</p>
+      <div class="quiz-actions"><button type="button" class="tool tool-primary" data-close="flash-dialog" id="flash-end">Terminer</button></div>`;
+    $('#flash-end').onclick = () => { $('#flash-dialog').close(); refresh(); }; return;
+  }
+  const it = f.q[f.i], c = it.card;
+  $('#flash-count').textContent = `${f.i + 1} sur ${f.q.length}`;
+  el.innerHTML = `<div class="quiz-progress"><i style="width:${(f.i / f.q.length) * 100}%"></i></div><p><span class="flash-chip">${esc(it.subject)}</span> <small class="text-slate-500">${esc(it.docName)}</small></p><p class="quiz-q">${esc(c.q)}</p>` + (f.show
+    ? `<div class="quiz-a">${esc(c.a)}</div><div class="grade-row" id="flash-grades">${SRS.GRADES.map(g => `<button type="button" class="grade-btn" data-g="${g.id}"><b>${esc(g.label)}</b><small>${esc(SRS.intervalLabel(SRS.previewIntervals(c.srs, today)[g.id]))}</small></button>`).join('')}</div>`
+    : `<p class="quiz-note">Réponds dans ta tête, puis vérifie.</p><div class="quiz-actions"><button type="button" id="flash-reveal" class="tool tool-primary">Voir la réponse</button></div>`);
+  $('#flash-reveal')?.addEventListener('click', () => { f.show = true; flashRender(); });
+  $$('#flash-grades [data-g]').forEach(b => b.onclick = guard(async () => {
+    const g = b.dataset.g, rec = await library.get(it.docId);
+    if (rec) { rec.cards = cleanCards(rec.cards).map(x => x.id === c.id ? gradeCard(x, g, today) : x); await library.update(it.docId, { cards: rec.cards }); if (doc && doc.id === it.docId) doc.cards = rec.cards; }
+    if (g === 'again' && !f.retried.has(c.id)) { f.retried.add(c.id); f.q.push({ ...it, card: { ...c, srs: { ...c.srs, due: today } } }); }   // une fiche oubliée revient en fin de séance
+    f.done++; f.i++; f.show = false; flashRender();
+  }));
+}
+async function renderCardsCard() {
+  const el = $('#cards-card'), due = dueCards(await library.withCards(), todayIso(), await activeKeep());
+  if (!due.length) { el.className = 'hidden'; el.innerHTML = ''; return; }
+  const subs = [...new Set(due.map(d => d.subject))];
+  el.className = 'cards-card';
+  el.innerHTML = `<div class="min-w-0 flex-1"><h2 class="font-semibold">🃏 ${plural(due.length, 'fiche à revoir', 'fiches à revoir')}</h2>
+    <p class="text-sm text-slate-500">${esc(subs.slice(0, 4).join(', '))}${subs.length > 4 ? '…' : ''} · ça prend ${Math.max(1, Math.round(Math.min(due.length, 30) * 0.4))} min</p></div>
+    <button type="button" id="cards-go" class="rv-btn rv-btn-primary">Commencer</button>`;
+  $('#cards-go').onclick = () => startFlash(due);
+}
+
+/* ---------------------------------------------------------------- rappel libre (révision active) + confiance */
+$('#doc-recall').onclick = () => {
+  if (!doc) return;
+  $('#recall-title').textContent = `Rappel libre · ${doc.name}`;
+  $('#recall-body').innerHTML = `<p>Sans regarder le document, <b>écris tout ce dont tu te souviens</b> : définitions, idées, formules, exemples. Même incomplet, c'est ce qui fait le plus progresser.</p>
+    <textarea id="recall-text" class="recall-text" placeholder="Ce que je retiens…"></textarea>
+    <div class="quiz-actions"><button type="button" id="recall-go" class="tool tool-primary">Comparer avec le cours</button></div>`;
+  $('#recall-dialog').showModal(); $('#recall-text').focus();
+  $('#recall-go').onclick = guard(recallCompare);
+};
+async function recallCompare() {
+  const mine = $('#recall-text').value.trim();
+  if (mine.length < 20) return toast('Écris un peu plus avant de comparer (quelques lignes).', false);
+  const body = $('#recall-body'); let feedback = '';
+  if (aiReady()) {
+    body.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><p class="quiz-note">L\'IA compare avec le cours…</p>';
+    try { feedback = `<div class="quiz-a ai-md">${mdToHtml(await AI.ask(aiConfig(), { system: aiContext(), messages: [{ role: 'user', content: recallRequest(mine) }] }))}</div>`; }
+    catch (e) { feedback = `<p class="text-red-700" role="alert">${esc(e.message)}</p>`; }
+  } else if (doc.summary) feedback = `<p class="quiz-note">Compare avec le résumé du cours :</p><div class="quiz-a ai-md">${mdToHtml(doc.summary)}</div>`;
+  else feedback = '<p class="quiz-note">Ferme cette fenêtre pour relire le cours, puis reviens noter ta confiance. (Avec une clé d\'assistant, l\'IA fait la comparaison pour toi.)</p>';
+  body.innerHTML = `${feedback}<p class="mt-3"><b>Comment te sens-tu sur ce cours ?</b></p><div class="conf-row">${LEVELS.map(l => `<button type="button" data-lv="${l.v}">${l.icon} ${l.label}</button>`).join('')}</div>`;
+  $$('#recall-body [data-lv]').forEach(b => b.onclick = guard(async () => { await rate(doc.subject_name, Number(b.dataset.lv)); $('#recall-dialog').close(); }));
+}
+async function rate(subject, level) {
+  const r = await api('/api/confidence', { method: 'POST', json: { subject, level } });
+  toast(r.level === 'weak' ? `Noté : « ${subject} » aura un peu plus de temps de révision` : 'Confiance enregistrée');
+  if (view !== 'doc') await refresh();
+}
+let confTimer = null;
+/** Après un créneau fait : « Comment te sens-tu ? » (barre discrète, disparaît seule). */
+function askConfidence(subject) {
+  const bar = $('#conf-bar'); clearTimeout(confTimer);
+  bar.className = 'conf-bar';
+  bar.innerHTML = `<span>Comment te sens-tu sur <b>${esc(subject)}</b> ?</span>${LEVELS.map(l => `<button type="button" data-lv="${l.v}" title="${l.label}">${l.icon} ${l.label}</button>`).join('')}<button type="button" id="conf-x" aria-label="Passer">✕</button>`;
+  const hide = () => { clearTimeout(confTimer); bar.className = 'hidden'; bar.innerHTML = ''; };
+  $$('#conf-bar [data-lv]').forEach(b => b.onclick = guard(async () => { hide(); await rate(subject, Number(b.dataset.lv)); }));
+  $('#conf-x').onclick = hide; confTimer = setTimeout(hide, 20000);
+}
+const confLine = s => {
+  if (!s.confidence_n) return '';
+  const icon = s.confidence_level === 'weak' ? '😕' : s.confidence_level === 'strong' ? '💪' : '🙂';
+  const note = s.confidence_level === 'weak' ? ' · +25 % de temps de révision' : s.confidence_level === 'strong' ? ' · −15 % de temps, tu maîtrises' : '';
+  return `<p class="conf-line ${s.confidence_level || ''}" title="Moyenne de tes dernières notes de confiance">${icon} Confiance : ${s.confidence.toFixed(1)}/3${note}</p>`;
+};
+
+/* ---------------------------------------------------------------- objectifs, défis et bilan */
+const GOAL_KEY = 'campass-goal', GOALHIT_KEY = 'campass-goal-hit', FRIENDS_KEY = 'campass-friends', NAME_KEY = 'campass-myname';
+const readGoal = () => Math.max(0, Math.min(3600, Number(lsGet(GOAL_KEY)) || 0));       // minutes par semaine
+const readFriends = () => { try { const o = JSON.parse(lsGet(FRIENDS_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
+const hours = m => `${Math.round(m / 6) / 10} h`;
+
+/** Carte « Mes statistiques » : chiffres, objectif, défis de la semaine, bilan et camarades. */
+async function renderStats() {
+  const card = $('#stats-card'), a = await api('/api/agenda'), subs = await api('/api/subjects'), today = todayIso(), log = readLog();
+  const wk = weekByDay(log, today), rate = doneRate(a.sessions, today), st = streak(log, today), goal = readGoal();
+  const active = subs.filter(s => s.enabled).map(s => s.name);
+  card.classList.toggle('hidden', !active.length && !wk.total);
+  const max = Math.max(1, ...wk.subjects.map(x => x.minutes));
+  const color = Object.fromEntries(subs.map(s => [s.name, s.color]));
+  const late = a.sessions.filter(s => s.status === 'pending' && s.day < today).length;
+  const ch = challenges(log, today, { goalMin: goal, subjects: active, lateCount: late });
+  const recap = weekRecap(log, a.sessions, today, { goalMin: goal, subjects: active });
+  const friends = Object.entries(readFriends());
+  if (goal && wk.total >= goal && lsGet(GOALHIT_KEY) !== mondayOf(today)) { lsSet(GOALHIT_KEY, mondayOf(today)); toast('🎉 Objectif de la semaine atteint, bravo !'); }
+  $('#stats-body').innerHTML = `<div class="stat-tiles">
+      <div><b>${fmtDur(wk.total)}</b><small>révisées cette semaine</small></div>
+      <div><b>${rate.pct === null ? '–' : rate.pct + ' %'}</b><small>créneaux faits (${rate.done}/${rate.due})</small></div>
+      <div><b>${st} 🔥</b><small>${st > 1 ? 'jours d\'affilée' : 'jour d\'affilée'}</small></div></div>
+    <ul class="stat-bars">${wk.subjects.map(x => `<li><span class="n">${esc(x.subject)}</span><span class="bar"><i style="width:${Math.round(100 * x.minutes / max)}%;background:${esc(color[x.subject] || '#64748b')}"></i></span><span class="v">${fmtDur(x.minutes)}</span></li>`).join('')}</ul>
+    <h3 class="font-semibold text-sm mt-4">Défis de la semaine</h3>
+    <div class="goal-row"><label for="goal-input">🎯 Mon objectif :</label><input id="goal-input" type="number" min="0" max="60" step="0.5" value="${goal ? goal / 60 : ''}" placeholder="0"> <span>h par semaine</span></div>
+    ${ch.map(c => `<div class="chal ${c.done ? 'done' : ''}"><span>${c.done ? '✅' : c.icon}</span><b class="font-medium">${esc(c.label)}</b><small>${c.id === 'goal' ? `${hours(c.now)} / ${hours(c.target)}` : `${c.now} / ${c.target}`}</small>
+      <span class="bar"><i style="width:${Math.round(100 * c.now / c.target)}%"></i></span></div>`).join('')}
+    <details class="recap" ${new Date().getDay() === 0 ? 'open' : ''}><summary>📅 Bilan de la semaine${new Date().getDay() === 0 ? ' (c\'est dimanche !)' : ''}</summary>
+      <pre>${esc(recapText(recap, hours, lsGet(NAME_KEY) || ''))}</pre>
+      <button type="button" id="recap-share" class="tool">📤 Partager mon bilan</button></details>
+    ${friends.length ? `<h3 class="font-semibold text-sm mt-4">👥 Camarades</h3>${friends.map(([n, f]) => `<div class="friend-row"><span>${esc(n)}</span><span>${hours(f.weekMin)} · ${f.streak} 🔥 <small class="text-slate-400">(${esc(fmtShort(f.d))})</small></span></div>`).join('')}
+      <div class="friend-row"><b>Moi</b><span><b>${hours(wk.total)} · ${st} 🔥</b></span></div>` : ''}`;
+  $('#goal-input').onchange = e => { const h = Math.max(0, Math.min(60, Number(e.target.value) || 0)); if (h) lsSet(GOAL_KEY, String(Math.round(h * 60))); else lsDel(GOAL_KEY); renderStats(); };
+  $('#recap-share').onclick = guard(async () => shareText(recapText(recap, hours, lsGet(NAME_KEY) || '')));
+}
+async function shareText(text, url) {
+  if (navigator.share) { try { await navigator.share({ text, ...(url ? { url } : {}) }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+  await navigator.clipboard.writeText(url ? `${text}\n${url}` : text); toast('Copié : colle-le dans une conversation');
+}
+
+/* ---------------------------------------------------------------- partage avec un camarade */
+$('#share-name').value = lsGet(NAME_KEY) || '';
+$('#share-name').onchange = e => lsSet(NAME_KEY, e.target.value.trim().slice(0, 40));
+async function buildMyShare() {
+  const today = todayIso(), name = ($('#share-name').value || '').trim();
+  const r = await api(`/api/courses-range?from=${addIsoDays(today, -7)}&to=${addIsoDays(today, 60)}`);
+  if (!r.courses.length) throw new Error('Aucun cours à partager : importe d\'abord ton emploi du temps.');
+  const log = readLog();
+  return buildShare({ name, courses: r.courses, colors: r.colors, from: addIsoDays(today, -7), to: addIsoDays(today, 60), stats: { weekMin: weekByDay(log, today).total, streak: streak(log, today) } });
+}
+const addIsoDays = (d, n) => { const x = parseDay(d); x.setDate(x.getDate() + n); return iso(x); };
+$('#share-link').onclick = guard(async () => {
+  const code = await encodeShare(await buildMyShare()), url = `${location.origin}${location.pathname}#partage=${code}`;
+  $('#share-note').textContent = url.length > 7000 ? `Lien long (${Math.round(url.length / 1000)} ko) : certaines messageries le coupent. Si ton camarade ne peut pas l'ouvrir, envoie plutôt le fichier.` : 'Lien prêt : seul qui le reçoit peut voir ton emploi du temps.';
+  await shareText(`📚 Voici mon planning de cours sur Révisions Campass : ouvre le lien pour l'ajouter au tien.`, url);
+});
+$('#share-file').onclick = guard(async () => { download(`planning-${iso(new Date())}.json`, JSON.stringify(await buildMyShare())); toast('Fichier téléchargé : envoie-le à ton camarade'); });
+$('#share-import').onchange = guard(async e => {
+  const f = e.target.files[0]; if (!f) return; e.target.value = '';
+  let raw; try { raw = JSON.parse(await readFile(f)); } catch { throw new Error('Ce fichier n\'est pas un planning partagé.'); }
+  await showShare(parseShare(raw));
+});
+async function showShare(sh) {
+  const mine = (await api('/api/courses-range?from=2000-01-01&to=2100-01-01')).courses, fresh = newCourses(sh.courses, mine, fold);
+  const subjects = [...new Set(sh.courses.map(c => c.subject))], who = sh.name || 'Un camarade';
+  const first = sh.courses.map(c => c.start.slice(0, 10)).sort()[0], last = sh.courses.map(c => c.start.slice(0, 10)).sort().pop();
+  $('#share-title').textContent = `Planning de ${who}`;
+  $('#share-body').innerHTML = `<p>👋 <b>${esc(who)}</b> te partage ${plural(sh.courses.length, 'cours', 'cours')} (${esc(fmtShort(first))} → ${esc(fmtShort(last))}) en ${esc(subjects.slice(0, 6).join(', '))}${subjects.length > 6 ? '…' : ''}.</p>
+    <p>${fresh.length ? `<b>${plural(fresh.length, 'nouveau cours', 'nouveaux cours')}</b> à ajouter${fresh.length < sh.courses.length ? ` (${sh.courses.length - fresh.length} déjà dans ton planning)` : ''}.` : 'Tout est déjà dans ton planning.'}</p>
+    ${sh.stats ? `<p class="text-sm text-slate-600">${esc(who)} a révisé ${hours(sh.stats.weekMin)} cette semaine, série de ${sh.stats.streak} jour${sh.stats.streak > 1 ? 's' : ''} 🔥 : tu pourras te comparer sur le tableau de bord.</p>` : ''}
+    <div class="quiz-actions"><button type="button" class="tool" id="sh-no">Annuler</button><button type="button" class="tool tool-primary" id="sh-yes" ${fresh.length || sh.stats ? '' : 'disabled'}>Ajouter à mon planning</button></div>`;
+  $('#share-dialog').showModal();
+  $('#sh-no').onclick = () => $('#share-dialog').close();
+  $('#sh-yes').onclick = guard(async () => {
+    let msg = '';
+    if (fresh.length) { const r = await api('/api/shared-courses', { method: 'POST', json: { courses: fresh, from_name: who } }); msg = `${plural(r.added, 'cours ajouté', 'cours ajoutés')} au planning`; }
+    if (sh.stats && sh.name) { const fr = readFriends(); fr[sh.name] = { weekMin: sh.stats.weekMin, streak: sh.stats.streak, d: todayIso() }; lsSet(FRIENDS_KEY, JSON.stringify(fr)); msg = msg || 'Stats de ton camarade enregistrées'; }
+    $('#share-dialog').close(); toast(msg); await refresh();
+  });
+}
+async function openSharedFromHash(hash = location.hash) {
+  const m = /^#partage=([A-Za-z0-9_-]+)$/.exec(hash);
+  if (!m) return false;
+  try { await showShare(parseShare(await decodeShare(m[1]))); } catch (e) { toast(e.message, false); }
+  return true;
+}
+
+/* ---------------------------------------------------------------- installation, hors-ligne et rappels */
+let installEvt = null;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; renderPhoneCard(); });
+addEventListener('appinstalled', () => { installEvt = null; renderPhoneCard(); toast('Appli installée 🎉'); });
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+async function renderPhoneCard() {
+  const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration().catch(() => null) : null;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), notif = 'Notification' in window ? Notification.permission : 'unsupported';
+  $('#pwa-install').classList.toggle('hidden', !installEvt);
+  $('#notif-enable').classList.toggle('hidden', notif !== 'default');
+  $('#pwa-status').innerHTML = [
+    isStandalone() ? '✅ L\'appli est installée sur cet appareil.' : installEvt ? '📲 Prête à être installée : touche le bouton ci-dessus.'
+      : ios ? '📲 Sur iPhone / iPad : touche le bouton Partager de Safari, puis « Sur l\'écran d\'accueil ».' : '📲 Dans le menu de ton navigateur, cherche « Installer l\'appli » ou « Ajouter à l\'écran d\'accueil ».',
+    reg && reg.active ? '✅ Fonctionne sans connexion (hors-ligne).' : '⏳ Le mode hors-ligne s\'active après la première visite en ligne.',
+    notif === 'granted' ? '🔔 Rappels activés (créneau qui commence, fin du minuteur).' : notif === 'denied' ? '🔕 Rappels bloqués dans les réglages du navigateur.' : notif === 'unsupported' ? 'Les rappels ne sont pas disponibles sur ce navigateur.' : '',
+  ].filter(Boolean).map(t => `<li>${t}</li>`).join('');
+}
+$('#pwa-install').onclick = guard(async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; renderPhoneCard(); });
+$('#notif-enable').onclick = guard(async () => { await Notification.requestPermission(); renderPhoneCard(); if (Notification.permission === 'granted') notify('Rappels activés', 'Tu seras prévenu quand un créneau commence.'); });
+async function notify(title, body, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) return reg.showNotification(title, { body, icon: 'icons/icon-192.png', tag }); } catch { /* repli ci-dessous */ }
+  try { new Notification(title, { body, tag, icon: 'icons/icon-192.png' }); } catch { /* ignoré */ }
+}
+/** Tant que l'appli est ouverte (même en arrière-plan) : prévient 10 minutes avant un créneau. */
+const notified = new Set();
+async function startReminder() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const a = await api('/api/agenda').catch(() => null); if (!a) return;
+  const now = new Date(), soon = a.sessions.filter(s => s.status === 'pending' && s.day === iso(now) && !notified.has(s.id)).filter(s => { const d = (new Date(s.start) - now) / 6e4; return d > 0 && d <= 10; });
+  for (const s of soon) { notified.add(s.id); notify(`${(WORK[s.work] || WORK.review).icon} ${s.subject} dans 10 min`, sessionWhat(s), s.id); }
+}
+setInterval(startReminder, 60000);
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').then(() => renderPhoneCard()).catch(() => {});
+}
+
 renderTimer();
 function show(v, p = null) {
   flushNotes();
@@ -1456,7 +1704,10 @@ $('#subj-back').onclick = () => show(subjectBack);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 await backend.autoSync();            // rafraîchit en silence si un lien est enregistré et ancien
 {
-  const [v, ...rest] = location.hash.slice(1).split('/');
+  const shared = /^#partage=/.test(location.hash) ? location.hash : '';
+  const [v, ...rest] = (shared ? '#dashboard' : location.hash).slice(1).split('/');
   let p = null; try { p = decodeURIComponent(rest.join('/')); } catch { /* hash invalide */ }
   show(v || 'dashboard', p);
+  if (shared) await openSharedFromHash(shared);
+  renderPhoneCard();
 }

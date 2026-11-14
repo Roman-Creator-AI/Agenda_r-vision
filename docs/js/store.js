@@ -1,5 +1,6 @@
 // Stockage local (localStorage) + sauvegarde / restauration en fichier JSON.
 // Rien ne quitte le navigateur : pas de serveur, pas de compte.
+import { cleanConfidence } from './confidence.js';
 export const KEY = 'campass-revisions:v2';
 export const VERSION = 2;
 const MAX_JSON = 8 * 1024 * 1024;
@@ -8,7 +9,7 @@ export const emptyState = () => ({
   version: VERSION,
   settings: { ics_url: '', last_sync: '', last_sync_count: '', last_error: '' },
   courses: [], subjects: {}, states: {}, blocks: [], next_block_id: 1,
-  recurring_blocks: [], custom_courses: [], next_item_id: 1,   // blocages hebdomadaires, cours ajoutés à la main
+  recurring_blocks: [], custom_courses: [], next_item_id: 1, confidence: {},   // blocages hebdomadaires, cours ajoutés à la main
 });
 
 const HEX = /^#[0-9a-fA-F]{6}$/, DAYRE = /^\d{4}-\d{2}-\d{2}$/, HM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -60,13 +61,14 @@ export function normalize(raw) {
     .filter(b => b && weekdays(b.weekdays).length && HM.test(b.start) && HM.test(b.end) && b.end > b.start)
     .map(b => ({ id: Math.round(num(b.id, 1, 1e9, 1)), weekdays: weekdays(b.weekdays), start: b.start, end: b.end,
                  label: str(b.label, 80), from: optDay(b.from), until: optDay(b.until) }));
-  s.custom_courses = (Array.isArray(raw.custom_courses) ? raw.custom_courses : []).slice(0, 200)
+  s.custom_courses = (Array.isArray(raw.custom_courses) ? raw.custom_courses : []).slice(0, 2000)
     .filter(c => c && HM.test(c.start) && HM.test(c.end) && c.end > c.start && DAYRE.test(c.from) &&
                  (c.frequency === 'once' || (c.frequency === 'weekly' && weekdays(c.weekdays).length)))
     .map(c => ({ id: Math.round(num(c.id, 1, 1e9, 1)), subject: str(c.subject, 120) || 'Sans titre', kind: str(c.kind, 30),
-                 room: str(c.room, 120), start: c.start, end: c.end, frequency: c.frequency,
+                 room: str(c.room, 120), from_name: str(c.from_name, 40), start: c.start, end: c.end, frequency: c.frequency,
                  weekdays: c.frequency === 'weekly' ? weekdays(c.weekdays) : [], every: Math.round(num(c.every, 1, 8, 1)),
                  from: c.from, until: optDay(c.until) }));
+  s.confidence = cleanConfidence(raw.confidence);
   s.next_item_id = Math.max(Math.round(num(raw.next_item_id, 1, 1e9, 1)),
     ...s.recurring_blocks.map(b => b.id + 1), ...s.custom_courses.map(c => c.id + 1), 1);
   return s;

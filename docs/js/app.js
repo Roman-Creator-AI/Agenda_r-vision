@@ -9,7 +9,8 @@ import * as SRS from './srs.js';
 import { mdToHtml } from './md.js';
 import { busyIntervals, freeSlot, spreadSessions, prioritize } from './scheduling.js';
 import { buildIcs } from './ics-export.js';
-import { WORK, workType, kindNoun, unitRange, guessTopic } from './kinds.js';
+import { cleanLog, weekByDay, streak, doneRate } from './stats.js';
+import { WORK, workType, examNoun, kindNoun, unitRange, guessTopic } from './kinds.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -53,12 +54,19 @@ function gauge(load) {
     ${l.minutes ? ` · fait : ${fmtDur(l.done_minutes)}` : ''}</p>`;
 }
 
+/** Ouvre le bon document d'un créneau : le dernier TD pour des exercices, le dernier cours sinon ; sinon la page de la matière. */
+async function openSessionDoc(s, from) {
+  const want = s.work === 'practice' ? 'td' : 'cours';
+  const docs = await library.list(s.subject);
+  const d = docs.find(x => (x.topic || 'cours') === want) || docs[0];
+  if (d) show('doc', d.id); else { toast(`Aucun ${want === 'td' ? 'TD' : 'cours'} déposé : ajoute-le ici`); openSubject(s.subject, from); }
+}
 const workPill = s => { const w = WORK[s.work] || WORK.review; return `<span class="work-pill ${esc(s.work || 'review')}" title="${esc(w.action)}">${w.icon} ${w.label}</span>`; };
 /** « Apprendre le cours du lun. 2 · chap. 1–2 · avant le TD du mar. 10 » / « Refaire les exercices du lun. 2 · série 1 · avant le cours… » */
 function sessionWhat(s) {
   const w = WORK[s.work] || WORK.review, rng = unitRange(s.work, s.chapters);
   const from = s.source_day ? ` du ${fmtShort(s.source_day)}` : '';
-  const to = s.target ? ` · avant le ${kindNoun(s.target_kind)} du ${fmtShort(s.target.slice(0, 10))}` : '';
+  const to = s.target ? ` · ${s.work === 'exam' ? 'pour' : 'avant'} ${s.work === 'exam' ? examNoun(s.target_kind) : 'le ' + kindNoun(s.target_kind)} du ${fmtShort(s.target.slice(0, 10))}` : '';
   return `${w.action}${from}${rng ? ' · ' + rng : ''}${to}`;
 }
 function badges(s) {
@@ -94,6 +102,8 @@ function sessionRow(s, withDay = false, draggable = false) {
       <p class="text-xs text-slate-500">${withDay ? fmtShort(s.day) + ' · ' : ''}${hhmm(s.start)}–${hhmm(s.end)} (${fmtDur(s.minutes)}) · ${esc(sessionWhat(s))}</p>
     </div>
     ${statusButtons(s)}
+    ${s.status === 'pending' ? `<button data-timer="${esc(s.id)}" class="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-100 shrink-0" title="Lancer un minuteur de ${s.minutes} min">▶ Commencer</button>` : ''}
+    <button data-open-doc="${esc(s.id)}" class="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-100 shrink-0" title="Ouvrir le ${s.work === 'practice' ? 'TD' : 'cours'} à travailler">📂 Ouvrir</button>
     ${s.status === 'pending' ? `<button data-move="${esc(s.id)}" class="text-xs text-slate-500 hover:text-slate-900 underline shrink-0">Modifier</button>` : ''}
   </li>`;
 }
@@ -102,11 +112,14 @@ let sessionIndex = {};
 function bindSessionActions(root) {
   $$('[data-status]', root).forEach(b => b.onclick = guard(async () => {
     const r = await api(`/api/sessions/${b.dataset.sid}`, { method: 'PATCH', json: { status: b.dataset.status } });
+    logSession(b.dataset.sid, b.dataset.status); stopTimerFor(b.dataset.sid);
     if (b.dataset.status === 'missed') toast(`Reporté au cycle suivant · retard de la matière : ${r.backlog}`);
     await refresh();
   }));
   $$('[data-move]', root).forEach(b => b.onclick = () => openMove(sessionIndex[b.dataset.move]));
   $$('[data-subj]', root).forEach(b => b.onclick = e => { e.stopPropagation(); openSubject(b.dataset.subj, view); });
+  $$('[data-timer]', root).forEach(b => b.onclick = () => startTimer(sessionIndex[b.dataset.timer]));
+  $$('[data-open-doc]', root).forEach(b => b.onclick = guard(async () => { reviewIntent = null; await openSessionDoc(sessionIndex[b.dataset.openDoc], view); }));
 }
 
 /** Ouvre la page « Mes cours » d'une matière (même présentation que dans Matières) ; le bouton Retour revient d'où on vient. */
@@ -150,6 +163,9 @@ $('#move-reset').onclick = guard(async () => {
 async function loadDashboard() {
   renderBackupBanner().catch(() => {});
   renderPriorities().catch(() => {});
+  renderExams().catch(() => {});
+  renderTasks();
+  renderStats().catch(() => {});
   renderDueCard($('#review-card-dash')).catch(() => {});
   const [t, w, subs] = await Promise.all([api('/api/today'), api(`/api/week?start=${iso(monday(new Date()))}`), api('/api/subjects')]);
   $('#today-date').textContent = fmtLong(t.date);
@@ -167,6 +183,94 @@ async function loadDashboard() {
     : '<li class="text-slate-400">Aucune</li>';
   bindSessionActions($('#view-dashboard'));
   renderMiniWeek(w);
+}
+
+/* ---------------------------------------------------------------- minuteur de séance */
+const TIMER_KEY = 'campass-timer';
+let timerTick = null;
+const readTimer = () => { try { return JSON.parse(lsGet(TIMER_KEY) || 'null'); } catch { return null; } };
+function startTimer(s) {
+  if (!s) return;
+  lsSet(TIMER_KEY, JSON.stringify({ sid: s.id, subject: s.subject, work: s.work, minutes: s.minutes, end: Date.now() + s.minutes * 60000 }));
+  renderTimer();
+}
+function stopTimerFor(sid) { const t = readTimer(); if (t && t.sid === sid) { lsDel(TIMER_KEY); renderTimer(); } }
+function renderTimer() {
+  const bar = $('#timer-bar'), t = readTimer();
+  clearInterval(timerTick); timerTick = null;
+  if (!t) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
+  bar.classList.remove('hidden');
+  const w = WORK[t.work] || WORK.review;
+  const paint = () => {
+    const left = t.end - Date.now();
+    if (left > 0) {
+      const m = Math.floor(left / 60000), sec = Math.floor(left % 60000 / 1000);
+      bar.className = 'timer-bar'; bar.innerHTML = `<span>${w.icon} <b>${esc(t.subject)}</b></span><b class="timer-clock">${m}:${String(sec).padStart(2, '0')}</b>
+        <button type="button" class="quiet" id="tm-stop">Arrêter</button>`;
+    } else {
+      bar.className = 'timer-bar done'; bar.innerHTML = `<span>⏰ <b>${esc(t.subject)}</b> : c'est terminé !</span>
+        <button type="button" class="primary" id="tm-done">✓ Fait</button><button type="button" class="quiet" id="tm-stop">Pas fini</button>`;
+      clearInterval(timerTick); timerTick = null;
+      if (!t.notified) { lsSet(TIMER_KEY, JSON.stringify({ ...t, notified: true })); toast(`⏰ ${t.subject} : temps écoulé`); }
+    }
+    $('#tm-stop').onclick = () => { lsDel(TIMER_KEY); renderTimer(); };
+    const d = $('#tm-done');
+    if (d) d.onclick = guard(async () => {
+      await api(`/api/sessions/${t.sid}`, { method: 'PATCH', json: { status: 'done' } });
+      if (!sessionIndex[t.sid]) sessionIndex[t.sid] = { id: t.sid, subject: t.subject, minutes: t.minutes };
+      logSession(t.sid, 'done'); lsDel(TIMER_KEY); renderTimer(); toast('Créneau marqué comme fait'); await refresh();
+    });
+  };
+  paint(); if (t.end > Date.now()) timerTick = setInterval(paint, 1000);
+}
+
+/* ---------------------------------------------------------------- tâches du jour (cases à cocher des notes) */
+const TASK_RE = /^(\s*[-*]\s*)\[([ xX])\]\s?(.*)$/;
+function renderTasks() {
+  const card = $('#tasks-card'), day = todayIso(), text = readNotes().days[day] || '';
+  const lines = text.split('\n'), tasks = [];
+  lines.forEach((l, i) => { const m = l.match(TASK_RE); if (m && m[3].trim()) tasks.push({ i, done: m[2] !== ' ', label: m[3].trim() }); });
+  card.classList.toggle('hidden', !tasks.length);
+  if (!tasks.length) return;
+  const left = tasks.filter(t => !t.done).length;
+  $('#tasks-sub').textContent = left ? `${left} à faire` : 'tout est fait 🎉';
+  $('#tasks-list').innerHTML = tasks.map(t => `<li><label class="task-row ${t.done ? 'done' : ''}"><input type="checkbox" data-line="${t.i}" ${t.done ? 'checked' : ''}> <span>${esc(t.label)}</span></label></li>`).join('');
+  $$('#tasks-list input').forEach(c => c.onchange = () => {
+    const n = readNotes(), ls = (n.days[day] || '').split('\n'), i = Number(c.dataset.line), m = ls[i] && ls[i].match(TASK_RE);
+    if (!m) return;
+    ls[i] = `${m[1]}[${c.checked ? 'x' : ' '}] ${m[3]}`; n.days[day] = ls.join('\n');
+    writeNotes(n); renderTasks();
+  });
+}
+
+/** Carte « Statistiques » : heures de la semaine par matière, taux de créneaux faits, série de jours. */
+async function renderStats() {
+  const card = $('#stats-card'), a = await api('/api/agenda'), today = todayIso(), log = readLog();
+  const wk = weekByDay(log, today), rate = doneRate(a.sessions, today), st = streak(log, today);
+  card.classList.toggle('hidden', !wk.total && !rate.done && !st);
+  const max = Math.max(1, ...wk.subjects.map(x => x.minutes));
+  const color = Object.fromEntries(a.sessions.map(s => [s.subject, s.color]));
+  $('#stats-body').innerHTML = `<div class="stat-tiles">
+      <div><b>${fmtDur(wk.total)}</b><small>révisées cette semaine</small></div>
+      <div><b>${rate.pct === null ? '–' : rate.pct + ' %'}</b><small>créneaux faits (${rate.done}/${rate.due})</small></div>
+      <div><b>${st} 🔥</b><small>${st > 1 ? 'jours d\'affilée' : 'jour d\'affilée'}</small></div></div>
+    <ul class="stat-bars">${wk.subjects.map(x => `<li><span class="n">${esc(x.subject)}</span><span class="bar"><i style="width:${Math.round(100 * x.minutes / max)}%;background:${esc(color[x.subject] || '#64748b')}"></i></span><span class="v">${fmtDur(x.minutes)}</span></li>`).join('')}</ul>`;
+}
+
+/** Carte « Examens à venir » : compte à rebours et avancement des révisions. */
+async function renderExams() {
+  const card = $('#exam-card'), list = await api('/api/exams');
+  card.classList.toggle('hidden', !list.length);
+  $('#exam-list').innerHTML = list.slice(0, 5).map(x => {
+    const pct = x.sessions_total ? Math.round(100 * x.sessions_done / x.sessions_total) : 0;
+    const left = x.days_left === 0 ? 'aujourd\'hui' : x.days_left === 1 ? 'demain' : `dans ${x.days_left} j`;
+    return `<li class="exam-item" style="border-left-color:${esc(x.color)}"><span class="exam-count ${x.days_left <= 7 ? 'soon' : ''}">${left}</span>
+      <div class="min-w-0 flex-1"><button type="button" class="subj-link font-medium" data-subj="${esc(x.subject)}">${esc(x.subject)}</button>
+        <span class="text-xs text-slate-500"> · ${esc(x.kind || 'Examen')} ${fmtShort(x.day)} ${hhmm(x.start)}</span>
+        <div class="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden"><div class="h-full bg-red-400" style="width:${pct}%"></div></div>
+        <p class="text-xs text-slate-500 mt-0.5">${x.sessions_total ? `${x.sessions_done}/${x.sessions_total} créneaux faits · reste ${fmtDur(x.minutes_left)}` : 'aucun créneau prévu'}</p></div></li>`;
+  }).join('');
+  bindSessionActions(card);
 }
 
 /** Carte « À réviser en priorité » : retards d'abord, puis prochain cours le plus proche. */
@@ -501,6 +605,7 @@ async function loadSubjects() {
       <details class="subj-settings"><summary>Réglages du planning</summary>
         <div class="grid grid-cols-2 gap-3">
           ${num('session_minutes', 'Durée d\'une session (min)', s.session_minutes, 5, 480, 5)}
+          ${num('practice_minutes', 'Durée d\'une session de TD (0 = idem)', s.practice_minutes || 0, 0, 480, 5)}
           ${num('intensity', 'Intensité (×)', s.intensity, 0.25, 5, 0.25)}
           ${num('chapters', 'Chapitres à revoir', s.chapters, 1, 60, 1)}
           ${num('chapters_per_session', 'Chapitres / session', s.chapters_per_session, 1, 30, 1)}
@@ -636,6 +741,15 @@ $('#ics-file').onchange = guard(async e => {
 const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } };
 const lsDel = k => { try { localStorage.removeItem(k); } catch { /* ignoré */ } };
+const STATS_KEY = 'campass-stats:v1';
+const readLog = () => { try { return cleanLog(JSON.parse(lsGet(STATS_KEY) || '{}')); } catch { return {}; } };
+const writeLog = l => lsSet(STATS_KEY, JSON.stringify(l));
+/** Journal des créneaux faits (pour les statistiques) : appelé à chaque changement d'état. */
+function logSession(sid, status) {
+  const l = readLog(), s = sessionIndex[sid];
+  if (status === 'done' && s) l[sid] = { d: todayIso(), subject: s.subject, minutes: s.minutes }; else delete l[sid];
+  writeLog(l);
+}
 const BK_KEY = 'campass-last-export', SNOOZE_KEY = 'campass-backup-snooze';
 const NOTES_KEY = 'campass-notes:v1', FREE_KEY = 'campass.feuille-blanche';      // même clé que la page feuille-blanche.html
 
@@ -658,6 +772,7 @@ async function exportBackup() {
   const { text } = await api('/api/export');
   const out = JSON.parse(text);
   out.notes = readNotes();                                  // les notes voyagent avec la sauvegarde
+  out.stats = readLog();
   download(`revisions-campass-${iso(new Date())}.json`, JSON.stringify(out, null, 2));
   lsSet(BK_KEY, new Date().toISOString()); lsDel(SNOOZE_KEY);
   toast('Sauvegarde exportée');
@@ -691,13 +806,13 @@ $('#import-file').onchange = guard(async e => {
   e.target.value = '';
   if (!confirm('Remplacer toutes les données de cet appareil par cette sauvegarde ?')) return;
   await api('/api/import', { method: 'POST', json: { text } });
-  try { const n = JSON.parse(text).notes; if (n) writeNotes(cleanNotes(n)); } catch { /* sauvegarde sans notes */ }
+  try { const j = JSON.parse(text); if (j.notes) writeNotes(cleanNotes(j.notes)); if (j.stats) writeLog(cleanLog(j.stats)); } catch { /* sauvegarde sans notes */ }
   toast('Sauvegarde restaurée'); await refresh();
 });
 $('#btn-reset').onclick = guard(async () => {
   if (!confirm('Effacer toutes les données de cet appareil (planning, cours téléversés, notes, clé de l\'assistant) ? Pense à exporter une sauvegarde avant.')) return;
   await api('/api/reset', { method: 'POST' });
-  await library.clear(); AI.clearSettings(); lsDel(NOTES_KEY); lsDel(FREE_KEY); lsDel(BK_KEY); lsDel(SNOOZE_KEY);
+  await library.clear(); AI.clearSettings(); lsDel(NOTES_KEY); lsDel(FREE_KEY); lsDel(STATS_KEY); lsDel(TIMER_KEY); lsDel(BK_KEY); lsDel(SNOOZE_KEY);
   toast('Données effacées'); await refresh();
 });
 $('#rblock-form').onsubmit = guard(async e => {
@@ -1322,6 +1437,7 @@ const loaders = { dashboard: loadDashboard, calendar: loadCalendar, agenda: load
                   notes: loadNotes, subject: loadSubject, doc: loadDoc };
 const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « enfants » : on garde « Matières » allumé
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
+renderTimer();
 function show(v, p = null) {
   flushNotes();
   if (full.on && v !== 'doc') setFull(false);

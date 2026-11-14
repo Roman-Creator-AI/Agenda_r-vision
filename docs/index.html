@@ -58,10 +58,23 @@
           <ul id="upcoming" class="space-y-1 text-sm"></ul>
         </div>
       </div>
+      <div id="tasks-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+        <div class="flex items-baseline gap-2 mb-2"><h2 class="font-semibold">✅ Mes tâches du jour</h2><span id="tasks-sub" class="text-xs text-slate-500"></span>
+          <button data-view="notes" class="ml-auto text-sm text-blue-600 hover:underline">Ouvrir mes notes →</button></div>
+        <ul id="tasks-list" class="space-y-1"></ul>
+      </div>
+      <div id="exam-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-3">🎯 Examens à venir</h2>
+        <ul id="exam-list" class="space-y-2"></ul>
+      </div>
       <div id="priority-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
         <div class="flex items-baseline gap-2 mb-1"><h2 class="font-semibold">À réviser en priorité</h2><span id="priority-sub" class="text-xs text-slate-500"></span></div>
         <p class="text-sm text-slate-500 mb-3">Les matières en retard d'abord, puis celles dont le prochain cours est le plus proche.</p>
         <ol id="priority-list" class="space-y-2"></ol>
+      </div>
+      <div id="stats-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-3">📊 Mes statistiques</h2>
+        <div id="stats-body"></div>
       </div>
       <div class="bg-white rounded-xl border border-slate-200 p-5">
         <div class="flex items-center justify-between mb-3">
@@ -373,6 +386,7 @@
       </div>
     </section>
   </main>
+  <div id="timer-bar" class="hidden" role="timer" aria-live="polite"></div>
 </div>
 
 <!-- Fenêtre de déplacement -->

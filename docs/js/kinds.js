@@ -19,8 +19,12 @@ export const workOf = kind => { const t = workType(kind); return t === 'learn' |
 export const WORK = {
   learn:    { icon: '📖', label: 'À apprendre',  action: 'Apprendre le cours',        unit: 'chap.',  doc: 'Cours' },
   practice: { icon: '✏️', label: 'Exercices',    action: 'Refaire les exercices',     unit: 'série',  doc: 'TD & exercices' },
+  exam:     { icon: '🎯', label: 'Examen',       action: 'Réviser pour l\'examen',    unit: 'chap.',  doc: 'Cours' },
   review:   { icon: '📚', label: 'À réviser',    action: 'Réviser',                   unit: 'chap.',  doc: 'Cours' },
 };
+
+/** « l'examen » ou « le DS » : pour compléter « avant … » / « pour … ». */
+export const examNoun = kind => (!String(kind || '').trim() || /^examen$/i.test(String(kind).trim()) ? 'l\'examen' : `le ${String(kind).trim()}`);
 
 /** « CM », « TD »… ; le type générique « Cours » (ou absent) devient « cours ». */
 export const kindNoun = kind => (!norm(kind) || norm(kind) === 'cours' ? 'cours' : String(kind).trim());

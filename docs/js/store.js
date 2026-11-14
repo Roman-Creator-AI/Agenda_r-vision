@@ -32,7 +32,7 @@ export function normalize(raw) {
     s.subjects[str(name, 120)] = {
       name: str(name, 120), color: HEX.test(v.color) ? v.color : '#64748b',
       session_minutes: Math.round(num(v.session_minutes, 5, 480, 60)), chapters: Math.round(num(v.chapters, 1, 60, 2)),
-      chapters_per_session: Math.round(num(v.chapters_per_session, 1, 30, 2)), intensity: num(v.intensity, 0.25, 5, 1),
+      chapters_per_session: Math.round(num(v.chapters_per_session, 1, 30, 2)), intensity: num(v.intensity, 0.25, 5, 1), practice_minutes: Math.round(num(v.practice_minutes, 0, 480, 0)),
       enabled: v.enabled === 0 || v.enabled === false ? 0 : 1, backlog: Math.round(num(v.backlog, 0, 99, 0)),
     };
   }

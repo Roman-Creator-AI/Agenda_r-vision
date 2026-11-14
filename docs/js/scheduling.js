@@ -69,8 +69,9 @@ export function prioritize(sessions, today) {
   for (const s of sessions) {
     if (s.status !== 'pending') continue;
     const late = s.day < today;
-    const g = by.get(s.subject) || { subject: s.subject, color: s.color, count: 0, minutes: 0, late: 0, lateMinutes: 0, nextTarget: null, nextDay: null };
+    const g = by.get(s.subject) || { subject: s.subject, color: s.color, count: 0, minutes: 0, late: 0, lateMinutes: 0, nextTarget: null, nextDay: null, learn: 0, practice: 0 };
     g.count++; g.minutes += s.minutes;
+    if (s.work === 'practice') g.practice++; else g.learn++;                    // à apprendre (cours) ou exercices (TD)
     if (late) { g.late++; g.lateMinutes += s.minutes; }
     else {
       if (!g.nextDay || s.day < g.nextDay) g.nextDay = s.day;

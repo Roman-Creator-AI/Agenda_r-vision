@@ -1,5 +1,6 @@
 // Export du planning de révision au format iCalendar (.ics) : on l'ouvre dans le calendrier du téléphone ou de l'ordinateur.
 // Heures « flottantes » (sans fuseau) : l'événement reste à 18h00 heure locale, où que tu sois.
+import { WORK, kindNoun, unitRange } from './kinds.js';
 const pad = n => String(n).padStart(2, '0');
 const esc = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/;/g, '\\;').replace(/,/g, '\\,');
 const local = dt => `${dt.slice(0, 4)}${dt.slice(5, 7)}${dt.slice(8, 10)}T${dt.slice(11, 13)}${dt.slice(14, 16)}00`;
@@ -32,13 +33,14 @@ export function buildIcs(sessions, { today, now = new Date(), alarmMinutes = 30,
   for (const s of sessions) {
     if (s.status !== 'pending' || s.day < today) continue;
     count++;
-    const chap = s.chapters && s.chapters.length ? ` · chapitres ${s.chapters[0]}${s.chapters.length > 1 ? '–' + s.chapters[s.chapters.length - 1] : ''}` : '';
+    const w = WORK[s.work] || WORK.review, rng = unitRange(s.work, s.chapters);
+    const from = s.source_day ? ` du ${fmtDay(s.source_day)}` : '';
     lines.push('BEGIN:VEVENT', `UID:${s.id}@revisions-campass`, `DTSTAMP:${stamp}`,
       `DTSTART:${local(s.start)}`, `DTEND:${local(s.end)}`,
-      `SUMMARY:${esc(`${s.catchup ? '↻' : '✎'} Révision : ${s.subject}`)}`,
-      `DESCRIPTION:${esc(`Prépare le cours du ${fmtDay(String(s.target).slice(0, 10))}${chap}`)}`,
+      `SUMMARY:${esc(`${s.catchup ? '↻ ' : ''}${w.icon} ${w.action} : ${s.subject}`)}`,
+      `DESCRIPTION:${esc(`${w.action}${from}${rng ? ' (' + rng + ')' : ''}, avant le ${kindNoun(s.target_kind)} du ${fmtDay(String(s.target).slice(0, 10))}`)}`,
       'CATEGORIES:Révision', 'TRANSP:TRANSPARENT');
-    if (alarmMinutes > 0) lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc('Révision : ' + s.subject)}`, `TRIGGER:-PT${alarmMinutes}M`, 'END:VALARM');
+    if (alarmMinutes > 0) lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(w.action + ' : ' + s.subject)}`, `TRIGGER:-PT${alarmMinutes}M`, 'END:VALARM');
     lines.push('END:VEVENT');
   }
   lines.push('END:VCALENDAR');

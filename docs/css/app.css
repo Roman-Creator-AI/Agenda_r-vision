@@ -277,3 +277,15 @@ body.no-scroll { overflow:hidden; }
 #notes-tabs button { color: #334155; }
 #notes-tabs button[aria-pressed="true"] { background: #1e293b; color: #fff; }
 .agenda-late .grow-text { flex: 1 1 16rem; }
+
+/* ---- cours (à apprendre) / TD (exercices) */
+.work-pill { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; vertical-align: middle; }
+.work-pill.learn { background: #dbeafe; color: #1d4ed8; }
+.work-pill.practice { background: #ffedd5; color: #c2410c; }
+.work-pill.review { background: #e2e8f0; color: #475569; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .75rem; color: #64748b; margin: 0 0 .5rem; }
+.ev.rev.work-practice { border-style: dashed; }
+.docs-head { display: flex; align-items: baseline; gap: .6rem; margin-top: .9rem; }
+.docs-head:first-child { margin-top: 0; }
+.docs-head small { color: #64748b; font-size: .75rem; }
+.agenda-late.hidden, .backup-banner.hidden { display: none; }

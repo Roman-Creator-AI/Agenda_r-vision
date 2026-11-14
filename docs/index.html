@@ -82,6 +82,9 @@
         <p class="text-xs text-slate-500 ml-auto">Glisse un créneau en pointillés (ordinateur) ou touche ⇄ pour le déplacer.</p>
       </div>
       <div class="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+        <p class="cal-legend" aria-label="Légende">
+          <span>📖 <b>Cours</b> (CM) : des choses à apprendre</span><span>✏️ <b>TD / TP</b> : des exercices à travailler</span><span>🔁 rappel de mémorisation</span>
+        </p>
         <div id="calendar" class="min-w-[760px]"></div>
       </div>
     </section>
@@ -131,11 +134,17 @@
         <span id="subj-dot" class="w-4 h-4 rounded-full shrink-0"></span>
         <h2 id="subj-title" class="font-semibold text-xl truncate"></h2>
       </div>
-      <p class="text-sm text-slate-500 mb-4">Téléverse ici tes vrais cours (PDF, Word, texte). Ouvre-en un pour le lire avec l'assistant, qui te résume les grands points et répond à tes questions.</p>
+      <p class="text-sm text-slate-500 mb-4">Téléverse ici tes documents (PDF, Word, texte) : les <b>cours</b> sont à apprendre, les <b>TD</b> sont des exercices à travailler. Ouvre-en un pour le lire avec l'assistant : il résume un cours, et guide un TD avec des indices, sans te donner la solution d'emblée.</p>
+      <div class="flex flex-wrap items-center gap-2 mb-2 text-sm">
+        <label for="doc-topic" class="text-slate-600">Je dépose :</label>
+        <select id="doc-topic" class="border rounded-lg px-2 py-1.5 bg-white">
+          <option value="auto">Détecter automatiquement</option><option value="cours">📖 Un cours (à apprendre)</option><option value="td">✏️ Un TD (exercices à travailler)</option>
+        </select>
+      </div>
       <div id="lib-warning" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 mb-4">⚠️ Le stockage de fichiers de ce navigateur est indisponible (navigation privée ?) : tes cours seront perdus à la fermeture de la page.</div>
       <label id="dropzone" class="dropzone" for="doc-file">
         <span class="text-2xl" aria-hidden="true">📂</span>
-        <span id="drop-label" class="font-medium">Ajouter des cours</span>
+        <span id="drop-label" class="font-medium">Ajouter des cours ou des TD</span>
         <span class="text-xs text-slate-500">Glisse tes fichiers ici ou touche pour les choisir · PDF, .docx, .txt, .md · 25 Mo max chacun</span>
         <input id="doc-file" type="file" multiple class="hidden">
       </label>
@@ -341,7 +350,7 @@
         <form id="course-form" class="space-y-2 mb-3 text-sm">
           <div class="flex flex-wrap gap-2 items-end">
             <label class="text-xs text-slate-600">Nom du cours<input type="text" name="subject" required maxlength="120" class="block border rounded-lg px-2 py-1.5 text-sm"></label>
-            <label class="text-xs text-slate-600">Type (CM, TD…)<input type="text" name="kind" maxlength="30" class="block w-24 border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">Type (CM, TD…)<input type="text" name="kind" maxlength="30" list="kind-list" placeholder="CM, TD…" class="block w-24 border rounded-lg px-2 py-1.5 text-sm"><datalist id="kind-list"><option value="CM"><option value="TD"><option value="TP"><option value="Examen"><option value="Projet"></datalist></label>
             <label class="text-xs text-slate-600">Salle<input type="text" name="room" maxlength="120" class="block w-28 border rounded-lg px-2 py-1.5 text-sm"></label>
             <label class="text-xs text-slate-600">De<input type="time" name="start" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
             <label class="text-xs text-slate-600">À<input type="time" name="end" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>

@@ -1,7 +1,8 @@
 // « Backend » exécuté dans le navigateur : mêmes routes et mêmes réponses JSON que l'API Flask
 // (app.py), mais les données vivent dans le localStorage de l'appareil.
-import { DEFAULT_CFG, DEFAULT_SUBJECT, plan, dailyLoad, workload } from './planner.js';
-import { DAY, addDays, dayToMs, isDay, todayLocal, weekday, pad2 } from './dates.js';
+import { DEFAULT_CFG, DEFAULT_SUBJECT, plan, dailyLoad, workload, consecutiveOccurrences } from './planner.js';
+import { workOf } from './kinds.js';
+import { DAY, addDays, dayToMs, dtToMs, isDay, todayLocal, weekday, pad2 } from './dates.js';
 import { IcsError, fetchICS, parseICS } from './ics.js';
 
 export class ApiError extends Error {
@@ -92,6 +93,11 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       ? S().recurring_blocks.flatMap(rb => recurringBlockDays(rb, addDays(days[0], -1), addDays(days[days.length - 1], 1)))
       : [];
     const sessions = plan(courses, subjects, S().states, S().blocks.concat(recurring), CFG, today());
+    // Chaque créneau révise la séance PRÉCÉDENTE (ce qu'on a vu) avant la suivante : cours → à apprendre, TD → exercices à refaire.
+    const pairs = new Map();
+    const prepared = courses.map(c => ({ ...c, startMs: dtToMs(c.start), day: c.start.slice(0, 10) }));
+    for (const [prev, nxt] of consecutiveOccurrences(prepared, CFG.groupBy)) pairs.set(`${String(nxt.subject).toLowerCase()}|${nxt.start}`, { prev, nxt });
+    for (const s of sessions) s.src = pairs.get(`${String(s.subject).toLowerCase()}|${s.targetStart}`) || null;
     return { sessions, subjects };
   }
 
@@ -101,6 +107,9 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     slot_index: s.slotIndex, slot_count: s.slotCount, chapters: s.chapters,
     status: s.status, done: s.done, catchup: s.catchup, moved: s.moved, overloaded: s.overloaded,
     overdue: s.day < today() && s.status === 'pending',
+    work: workOf(s.src ? s.src.prev.kind : ''),                                // 'learn' | 'practice' | 'review'
+    source_kind: s.src ? s.src.prev.kind || '' : '', source_day: s.src ? s.src.prev.start.slice(0, 10) : null,
+    target_kind: s.src ? s.src.nxt.kind || '' : '',
     custom_minutes: !!(S().states[s.sid] && S().states[s.sid].minutes),     // durée fixée à la main
   });
 

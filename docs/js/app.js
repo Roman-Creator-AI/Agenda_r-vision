@@ -9,6 +9,7 @@ import * as SRS from './srs.js';
 import { mdToHtml } from './md.js';
 import { busyIntervals, freeSlot, spreadSessions, prioritize } from './scheduling.js';
 import { buildIcs } from './ics-export.js';
+import { WORK, workType, kindNoun, unitRange, guessTopic } from './kinds.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -52,6 +53,14 @@ function gauge(load) {
     ${l.minutes ? ` · fait : ${fmtDur(l.done_minutes)}` : ''}</p>`;
 }
 
+const workPill = s => { const w = WORK[s.work] || WORK.review; return `<span class="work-pill ${esc(s.work || 'review')}" title="${esc(w.action)}">${w.icon} ${w.label}</span>`; };
+/** « Apprendre le cours du lun. 2 · chap. 1–2 · avant le TD du mar. 10 » / « Refaire les exercices du lun. 2 · série 1 · avant le cours… » */
+function sessionWhat(s) {
+  const w = WORK[s.work] || WORK.review, rng = unitRange(s.work, s.chapters);
+  const from = s.source_day ? ` du ${fmtShort(s.source_day)}` : '';
+  const to = s.target ? ` · avant le ${kindNoun(s.target_kind)} du ${fmtShort(s.target.slice(0, 10))}` : '';
+  return `${w.action}${from}${rng ? ' · ' + rng : ''}${to}`;
+}
 function badges(s) {
   return [
     s.catchup ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">rattrapage</span>' : '',
@@ -76,14 +85,13 @@ function statusButtons(s) {
 }
 
 function sessionRow(s, withDay = false, draggable = false) {
-  const chap = s.chapters.length ? ` · chap. ${s.chapters[0]}${s.chapters.length > 1 ? '–' + s.chapters[s.chapters.length - 1] : ''}` : '';
   const part = s.catchup ? ' · rattrapage' : (s.slot_count > 1 ? ` (${s.slot_index + 1}/${s.slot_count})` : '');
   const tone = s.status === 'done' ? 'opacity-60' : s.status === 'missed' ? 'bg-red-50' : 'bg-white';
   return `<li class="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-slate-200 ${tone}${draggable ? ' drag-card' : ''}" ${draggable ? `draggable="true" data-drag-sid="${esc(s.id)}" title="Glisse sur un autre jour pour déplacer"` : ''} style="border-left:5px solid ${esc(s.color)}">
     ${draggable ? '<span class="drag-handle" aria-hidden="true" title="Maintiens et glisse vers un autre jour">⠿</span>' : ''}
     <div class="flex-1 min-w-[12rem]">
-      <p class="font-medium ${s.status === 'done' ? 'line-through' : ''}"><button type="button" class="subj-link" data-subj="${esc(s.subject)}" title="Ouvrir les cours de cette matière">${esc(s.subject)}</button>${part} ${badges(s)}</p>
-      <p class="text-xs text-slate-500">${withDay ? fmtShort(s.day) + ' · ' : ''}${hhmm(s.start)}–${hhmm(s.end)} (${fmtDur(s.minutes)})${chap} · prépare le cours du ${fmtShort(s.target.slice(0, 10))}</p>
+      <p class="font-medium ${s.status === 'done' ? 'line-through' : ''}"><button type="button" class="subj-link" data-subj="${esc(s.subject)}" title="Ouvrir les cours de cette matière">${esc(s.subject)}</button>${part} ${workPill(s)} ${badges(s)}</p>
+      <p class="text-xs text-slate-500">${withDay ? fmtShort(s.day) + ' · ' : ''}${hhmm(s.start)}–${hhmm(s.end)} (${fmtDur(s.minutes)}) · ${esc(sessionWhat(s))}</p>
     </div>
     ${statusButtons(s)}
     ${s.status === 'pending' ? `<button data-move="${esc(s.id)}" class="text-xs text-slate-500 hover:text-slate-900 underline shrink-0">Modifier</button>` : ''}
@@ -172,8 +180,8 @@ async function renderPriorities() {
   $('#priority-list').innerHTML = list.map((g, i) => {
     const n = counts[fold(g.subject)] || 0;
     const parts = [g.late ? `${plural(g.late, 'créneau', 'créneaux')} à rattraper (${fmtDur(g.lateMinutes)})` : '',
-                   g.nextTarget ? `prochain cours ${fmtShort(g.nextTarget.slice(0, 10))}` : '',
-                   g.count > g.late ? `${plural(g.count - g.late, 'créneau prévu', 'créneaux prévus')}` : ''].filter(Boolean);
+                   g.nextTarget ? `prochaine séance ${fmtShort(g.nextTarget.slice(0, 10))}` : '',
+                   g.learn ? `${WORK.learn.icon} ${g.learn} à apprendre` : '', g.practice ? `${WORK.practice.icon} ${g.practice} en exercices` : ''].filter(Boolean);
     return `<li class="prio-item" style="border-left-color:${esc(g.color)}"><span class="rank">${i + 1}</span>
       <div class="min-w-0 flex-1"><button type="button" class="subj-link font-medium" data-subj="${esc(g.subject)}" title="Ouvrir les cours de cette matière">${esc(g.subject)}</button>
         ${g.late ? '<span class="late">en retard</span>' : ''}<p class="text-xs text-slate-500">${esc(parts.join(' · '))}</p></div>
@@ -225,9 +233,10 @@ async function loadCalendar() {
     w.courses.filter(c => c.start.slice(0, 10) === k).forEach(c => {
       const top = (mins(c.start) - w.day_start * 60) / 60 * HOUR_PX, h = Math.max(18, (mins(c.end) - mins(c.start)) / 60 * HOUR_PX);
       const nDocs = docCounts[fold(c.subject)] || 0;
+      const ct = workType(c.kind), ci = ct === 'learn' ? WORK.learn.icon : ct === 'practice' ? WORK.practice.icon : '';
       ev.push(`<div class="ev course" role="button" tabindex="0" data-subj="${esc(c.subject)}" style="top:${top}px;height:${h}px;background:${esc(c.color)}22;border-left:4px solid ${esc(c.color)}"
         title="${esc(c.summary)} — clique pour ouvrir / ajouter les cours de cette matière">
-        <b>${esc(c.subject)}</b> ${esc(c.kind)}${nDocs ? ` <span class="doc-count">📎 ${nDocs}</span>` : ''}<br>${hhmm(c.start)}–${hhmm(c.end)}${c.room ? ' · ' + esc(c.room) : ''}</div>`);
+        <b>${esc(c.subject)}</b> ${ci} ${esc(c.kind)}${nDocs ? ` <span class="doc-count">📎 ${nDocs}</span>` : ''}<br>${hhmm(c.start)}–${hhmm(c.end)}${c.room ? ' · ' + esc(c.room) : ''}</div>`);
     });
     w.blocks.filter(b => b.day === k).forEach(b => {
       const top = ((+b.start.slice(0, 2)) * 60 + +b.start.slice(3) - w.day_start * 60) / 60 * HOUR_PX;
@@ -239,8 +248,8 @@ async function loadCalendar() {
       const acts = s.status === 'pending'
         ? `<button class="mini" data-status="done" data-sid="${esc(s.id)}" title="Fait">✓</button> <button class="mini" data-status="missed" data-sid="${esc(s.id)}" title="Non fait">✗</button> <button class="mini" data-move="${esc(s.id)}" title="Déplacer">⇄</button>`
         : `<button class="mini" data-status="pending" data-sid="${esc(s.id)}" title="Annuler">↩</button>`;
-      ev.push(`<div class="ev rev ${s.status}" draggable="true" data-sid="${esc(s.id)}" style="top:${top}px;height:${h}px;border-color:${esc(s.color)};color:${esc(s.color)}">
-        <b data-subj="${esc(s.subject)}" class="subj-link" title="Ouvrir les cours de cette matière">${s.catchup ? '↻' : '✎'} ${esc(s.subject)}</b>${s.overloaded ? ' ⚠️' : ''}<br>${hhmm(s.start)}–${hhmm(s.end)} ${acts}</div>`);
+      ev.push(`<div class="ev rev ${s.status} work-${esc(s.work)}" draggable="true" data-sid="${esc(s.id)}" title="${esc(s.subject + ' : ' + sessionWhat(s))}" style="top:${top}px;height:${h}px;border-color:${esc(s.color)};color:${esc(s.color)}">
+        <b data-subj="${esc(s.subject)}" class="subj-link" title="Ouvrir les cours de cette matière">${s.catchup ? '↻' : ''}${(WORK[s.work] || WORK.review).icon} ${esc(s.subject)}</b>${s.overloaded ? ' ⚠️' : ''}<br>${hhmm(s.start)}–${hhmm(s.end)} ${acts}</div>`);
     });
     cols += `<div class="week-grid border-l border-slate-200" data-day="${k}" style="height:${hours * HOUR_PX}px;background-image:repeating-linear-gradient(to bottom,#e2e8f0 0,#e2e8f0 1px,transparent 1px,transparent ${HOUR_PX}px)">${ev.join('')}</div>`;
   }
@@ -730,15 +739,24 @@ async function loadSubject(name) {
   $('#subj-title').textContent = s.name;
   $('#lib-warning').classList.toggle('hidden', library.persistent);
   const docs = await library.list(s.name);
-  $('#docs-list').innerHTML = docs.length ? docs.map(d => `<li class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400" style="border-left:5px solid ${esc(s.color)}">
+  const docRow = d => `<li class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400" style="border-left:5px solid ${esc(s.color)}">
       <button data-doc="${d.id}" class="flex-1 min-w-0 text-left">
         <p class="font-medium truncate">${KIND_ICON[d.kind] || '📄'} ${esc(d.name)} ${d.has_summary ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 align-middle">✨ résumé</span>' : ''}
           ${d.srs ? `<span class="text-[10px] px-1.5 py-0.5 rounded align-middle ${d.srs.due <= iso(new Date()) ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}">🔁 ${esc(SRS.dueLabel(d.srs.due, iso(new Date())))}</span>` : ''}</p>
         <p class="text-xs text-slate-500">${fmtSize(d.size)} · ajouté le ${new Date(d.added).toLocaleDateString('fr-FR')}${d.messages ? ` · ${d.messages} message${d.messages > 1 ? 's' : ''}` : ''}</p>
       </button>
-      <button data-rm="${d.id}" data-name="${esc(d.name)}" class="text-xs text-red-600 hover:underline shrink-0">Supprimer</button></li>`).join('')
-    : '<li class="text-sm text-slate-400 p-2">Aucun cours pour le moment. Ajoute ton premier fichier ci-dessus.</li>';
+      <button data-topic="${d.id}" data-to="${d.topic === 'td' ? 'cours' : 'td'}" class="text-xs text-slate-500 hover:underline shrink-0" title="Corriger le type de ce document">${d.topic === 'td' ? '→ c\'est un cours' : '→ c\'est un TD'}</button>
+      <button data-rm="${d.id}" data-name="${esc(d.name)}" class="text-xs text-red-600 hover:underline shrink-0">Supprimer</button></li>`;
+  const groups = [['cours', 'learn', 'Cours', 'à apprendre'], ['td', 'practice', 'TD & exercices', 'à travailler']];
+  const html = groups.map(([topic, work, title, sub]) => {
+    const list = docs.filter(d => (d.topic === 'td' ? 'td' : 'cours') === topic);
+    return list.length ? `<li class="docs-head"><span class="work-pill ${work}">${WORK[work].icon} ${title}</span><small>${sub} · ${list.length}</small></li>${list.map(docRow).join('')}` : '';
+  }).join('');
+  $('#docs-list').innerHTML = html || '<li class="text-sm text-slate-400 p-2">Aucun document pour le moment. Ajoute ton premier cours ou TD ci-dessus.</li>';
   $$('#docs-list [data-doc]').forEach(b => b.onclick = () => show('doc', b.dataset.doc));
+  $$('#docs-list [data-topic]').forEach(b => b.onclick = guard(async () => {
+    await library.update(b.dataset.topic, { topic: b.dataset.to }); await loadSubject(name);
+  }));
   $$('#docs-list [data-rm]').forEach(b => b.onclick = guard(async () => {
     if (!confirm(`Supprimer « ${b.dataset.name} » de cet appareil ?`)) return;
     await library.remove(b.dataset.rm); toast('Cours supprimé'); await loadSubject(name);
@@ -755,12 +773,13 @@ async function uploadFiles(files) {
       label.textContent = `Lecture de ${f.name}…`;
       try {
         const { kind, text } = await extractText(f);
-        await library.add({ subject: currentSubject.name, name: f.name, kind, size: f.size, text, blob: f });
+        const pick = $('#doc-topic').value;
+        await library.add({ subject: currentSubject.name, name: f.name, kind, size: f.size, text, blob: f, topic: pick === 'auto' ? guessTopic(f.name) : pick });
         added++;
       } catch (e) { errors.push(`${f.name} : ${e.message}`); }
     }
-  } finally { zone.classList.remove('busy'); label.textContent = 'Ajouter des cours'; }
-  if (added) toast(`${added} cours ajouté${added > 1 ? 's' : ''}${errors.length ? ` · ${errors.length} refusé${errors.length > 1 ? 's' : ''}` : ''}`);
+  } finally { zone.classList.remove('busy'); label.textContent = 'Ajouter des cours ou des TD'; }
+  if (added) toast(`${added} document${added > 1 ? 's ajoutés' : ' ajouté'}${errors.length ? ` · ${errors.length} refusé${errors.length > 1 ? 's' : ''}` : ''}`);
   if (errors.length) toast(errors.join('\n'), false);
   await loadSubject(currentSubject.name);
 }
@@ -834,9 +853,10 @@ function renderChat() {
     ? `<div class="msg msg-user">${esc(m.content)}</div>`
     : `<div class="msg msg-ai"><div class="ai-md">${mdToHtml(m.content)}</div><button type="button" class="copy-btn" data-copy="${i}">Copier</button></div>`).join('');
   $('#ai-empty').classList.toggle('hidden', n > 0);
-  $('#ai-suggest').innerHTML = AI.QUICK_ACTIONS.map((a, i) => `<li><button type="button" data-qa="${i}"><span aria-hidden="true">${a.icon}</span>${esc(a.label)}</button></li>`).join('');
-  $('#ai-quick').innerHTML = n ? AI.QUICK_ACTIONS.map((a, i) => `<button type="button" data-qa="${i}">${a.icon} ${esc(a.label)}</button>`).join('') : '';
-  $$('#ai-suggest [data-qa], #ai-quick [data-qa]').forEach(b => b.onclick = () => sendQuestion(AI.QUICK_ACTIONS[b.dataset.qa].prompt));
+  const QA = T().quick;
+  $('#ai-suggest').innerHTML = QA.map((a, i) => `<li><button type="button" data-qa="${i}"><span aria-hidden="true">${a.icon}</span>${esc(a.label)}</button></li>`).join('');
+  $('#ai-quick').innerHTML = n ? QA.map((a, i) => `<button type="button" data-qa="${i}">${a.icon} ${esc(a.label)}</button>`).join('') : '';
+  $$('#ai-suggest [data-qa], #ai-quick [data-qa]').forEach(b => b.onclick = () => sendQuestion(QA[b.dataset.qa].prompt));
 }
 $('#ai-chat').addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');
@@ -860,7 +880,16 @@ function updateAiStatus(busyText = '') {
   el.className = 'ai-status' + (busyText ? ' busy' : c.key ? ' ready' : '');
   el.textContent = busyText || (c.key ? c.model : 'Clé API à ajouter');
 }
-const aiContext = () => AI.systemPrompt({ subject: doc.subject_name, title: doc.name, text: doc.text });
+const T = () => AI.forTopic(doc && doc.topic);
+const aiContext = () => T().system({ subject: doc.subject_name, title: doc.name, text: doc.text });
+/** Textes qui changent selon que le document est un cours (à apprendre) ou un TD (exercices). */
+function applyTopicTexts() {
+  const t = T();
+  $('.ai-summary summary').textContent = t.summaryTitle;
+  $('#ai-empty p').textContent = t.emptyIntro;
+  $('#review-quiz').textContent = t.quizBtn; $('#review-reread').textContent = t.rereadBtn;
+  $('#review-choice p').innerHTML = t.reviewIntro; $('#review-grade p').innerHTML = t.gradeIntro;
+}
 
 function renderSummary(state, msg = '') {
   const el = $('#ai-summary'), btn = $('#ai-resum');
@@ -868,7 +897,7 @@ function renderSummary(state, msg = '') {
   if (state !== 'ready') el.closest('details').open = true;
   if (state === 'ready') el.innerHTML = mdToHtml(doc.summary);
   else if (state === 'loading') el.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="sr-only">Lecture du cours en cours</span>';
-  else if (state === 'nokey') el.innerHTML = `<p class="text-slate-600">Ajoute ta clé API pour obtenir un résumé du cours et lui poser tes questions.</p>
+  else if (state === 'nokey') el.innerHTML = `<p class="text-slate-600">${esc(T().noKey)}</p>
       <button type="button" data-config class="tool tool-primary mt-3">Ajouter ma clé</button>`;
   else el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><button type="button" data-retry class="tool mt-3">Réessayer</button>`;
   $('[data-config]', el)?.addEventListener('click', openAiSettings);
@@ -880,7 +909,7 @@ async function summarize() {
   if (!cfg.key) return renderSummary('nokey');
   aiBusy = true; renderSummary('loading'); updateAiStatus('Lit le cours…');
   try {
-    const text = await AI.ask(cfg, { system: aiContext(), messages: [{ role: 'user', content: AI.SUMMARY_REQUEST }] });
+    const text = await AI.ask(cfg, { system: aiContext(), messages: [{ role: 'user', content: T().summaryRequest }] });
     if (token !== docToken) return;
     doc.summary = text;
     await library.update(doc.id, { summary: text });
@@ -933,7 +962,8 @@ function renderMeta(d) {
   const marks = d.text.match(/^\[(Page|Diapo) \d+\]$/gm) || [];
   const unit = d.kind === 'pptx' || (marks[0] || '').startsWith('[Diapo') ? 'diapo' : 'page';
   const words = (d.text.match(/\S+/g) || []).length;
-  const parts = [`<span>${KIND_LABEL[d.kind] || 'Document'}</span>`];
+  const parts = [d.topic === 'td' ? `<span class="work-pill practice">${WORK.practice.icon} TD · exercices</span>` : `<span class="work-pill learn">${WORK.learn.icon} Cours</span>`,
+                 `<span>${KIND_LABEL[d.kind] || 'Document'}</span>`];
   if (marks.length) parts.push(`<span><b>${marks.length}</b> ${unit}${marks.length > 1 ? 's' : ''}</span>`);
   parts.push(`<span><b>${Math.max(1, Math.round(words / 200))} min</b> de lecture</span>`, `<span>${fmtSize(d.size)}</span>`);
   $('#doc-meta').innerHTML = parts.join('');
@@ -1010,7 +1040,7 @@ async function loadDoc(id) {
   renderMeta(d);
   $('#doc-back-label').textContent = d.subject_name;
   $('#doc-original').classList.toggle('hidden', !d.blob);
-  updateAiStatus(); applySize();
+  updateAiStatus(); applySize(); applyTopicTexts();
   renderReader(d.text); renderChat();
   window.scrollTo({ top: 0 }); $('#doc-article').scrollTop = 0; updateProgress();
   setupPdf(d, docToken);
@@ -1108,9 +1138,9 @@ async function renderDueCard(el) {
 function renderSrs() {
   const row = $('#srs-row'), c = doc.srs, today = todayIso();
   if (!c) {
-    row.innerHTML = `<button type="button" id="srs-start" class="tool">✓ J'ai travaillé ce cours</button>
+    row.innerHTML = `<button type="button" id="srs-start" class="tool">${esc(T().srsStart)}</button>
       <label class="srs-hint">le <input type="date" id="srs-date" value="${today}" max="${today}" class="srs-date"></label>
-      <span class="srs-hint">Lance des rappels de mémorisation, facultatifs.</span>`;
+      <span class="srs-hint">${esc(T().srsHint)}</span>`;
     $('#srs-start').onclick = guard(async () => {
       const day = /^\d{4}-\d{2}-\d{2}$/.test($('#srs-date').value) && $('#srs-date').value <= todayIso() ? $('#srs-date').value : todayIso();
       doc.srs = await updateSrs(doc.id, () => SRS.startCard(day));
@@ -1125,7 +1155,7 @@ function renderSrs() {
     ${docSubjectActive ? '' : '<span class="srs-hint">Cette matière n\'est plus dans tes révisions : ses rappels sont masqués.</span>'}`;
   $('#srs-review').onclick = () => { reviewIntent = String(doc.id); showReviewBar(); };
   $('#srs-stop').onclick = guard(async () => {
-    if (!confirm('Arrêter les rappels de ce cours ? Son historique de révision sera effacé.')) return;
+    if (!confirm(T().srsStop)) return;
     await updateSrs(doc.id, () => null); doc.srs = null; hideReviewBar(); renderSrs();
   });
 }
@@ -1164,11 +1194,11 @@ async function startQuiz() {
   if (!doc || !doc.srs) return;
   if (!aiConfig().key) return openAiSettings();
   const session = ++quizSession;
-  quiz = null; $('#quiz-title').textContent = doc.name;
+  quiz = null; $('#quiz-title').textContent = `${T().quizTitle} · ${doc.name}`;
   if (!$('#quiz-dialog').open) $('#quiz-dialog').showModal();
   quizRender('loading');
   try {
-    const text = await AI.ask(aiConfig(), { system: aiContext(), messages: [{ role: 'user', content: AI.quizRequest(Date.now() % 1000) }] });
+    const text = await AI.ask(aiConfig(), { system: aiContext(), messages: [{ role: 'user', content: T().quizRequest(Date.now() % 1000) }] });
     if (session !== quizSession) return;
     const cards = AI.parseQuiz(text);
     if (!cards) throw new Error('L\'assistant n\'a pas renvoyé de questions exploitables. Réessaie.');
@@ -1178,18 +1208,18 @@ async function startQuiz() {
 }
 function quizRender(state, msg = '') {
   const el = $('#quiz-body'), q = quiz;
-  $('#quiz-count').textContent = state === 'card' ? `Question ${q.i + 1} sur ${q.cards.length}` : '';
+  $('#quiz-count').textContent = state === 'card' ? `${T().item} ${q.i + 1} sur ${q.cards.length}` : '';
   if (state === 'loading') {
-    el.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><p class="quiz-note">L\'assistant prépare tes questions…</p>';
+    el.innerHTML = `<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><p class="quiz-note">${esc(T().loading)}</p>`;
   } else if (state === 'error') {
     el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><div class="quiz-actions"><button type="button" id="quiz-retry" class="tool tool-primary">Réessayer</button><button type="button" id="quiz-reread" class="tool">Relire le cours à la place</button></div>`;
     $('#quiz-retry').onclick = () => startQuiz(); $('#quiz-reread').onclick = startReread;
   } else if (state === 'card') {
     const c = q.cards[q.i];
     el.innerHTML = `<div class="quiz-progress"><i style="width:${(q.i / q.cards.length) * 100}%"></i></div><p class="quiz-q">${esc(c.q)}</p>` + (q.revealed
-      ? `<div class="quiz-a ai-md">${mdToHtml(c.a)}</div><p class="quiz-note">Tu le savais ?</p>
-         <div class="quiz-actions"><button type="button" class="tool" data-know="0">Pas vraiment</button><button type="button" class="tool tool-primary" data-know="1">Je savais</button></div>`
-      : `<p class="quiz-note">Réponds de tête, ou à voix haute, puis vérifie.</p><div class="quiz-actions"><button type="button" id="quiz-reveal" class="tool tool-primary">Voir la réponse</button></div>`);
+      ? `<div class="quiz-a ai-md">${mdToHtml(c.a)}</div><p class="quiz-note">${esc(T().knew)}</p>
+         <div class="quiz-actions"><button type="button" class="tool" data-know="0">${esc(T().no)}</button><button type="button" class="tool tool-primary" data-know="1">${esc(T().yes)}</button></div>`
+      : `<p class="quiz-note">${esc(T().ask)}</p><div class="quiz-actions"><button type="button" id="quiz-reveal" class="tool tool-primary">${esc(T().reveal)}</button></div>`);
     $('#quiz-reveal')?.addEventListener('click', () => { q.revealed = true; quizRender('card'); });
     $$('[data-know]', el).forEach(b => b.onclick = () => {
       q.right += Number(b.dataset.know); q.i++; q.revealed = false;

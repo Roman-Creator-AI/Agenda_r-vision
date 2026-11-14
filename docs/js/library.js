@@ -45,8 +45,8 @@ const meta = ({ blob, text, chat, ...rest }) => ({ ...rest, chars: text ? text.l
 export class Library {
   constructor(backend) { this.b = backend; this.persistent = backend.persistent; }
 
-  async add({ subject, name, kind, size, text, blob }) {
-    return this.b.put({ subject: fold(subject), subject_name: subject, name, kind, size, text, blob: blob || null,
+  async add({ subject, name, kind, size, text, blob, topic = 'cours' }) {
+    return this.b.put({ subject: fold(subject), subject_name: subject, name, kind, size, text, blob: blob || null, topic: topic === 'td' ? 'td' : 'cours',
                         added: new Date().toISOString(), summary: '', chat: [] });
   }
   /** Documents d'une matière (sans texte ni fichier), du plus récent au plus ancien. */

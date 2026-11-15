@@ -95,7 +95,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     const recurring = days.length
       ? S().recurring_blocks.flatMap(rb => recurringBlockDays(rb, addDays(days[0], -1), addDays(days[days.length - 1], 1)))
       : [];
-    const sessions = plan(courses, subjects, S().states, S().blocks.concat(recurring), CFG, today());
+    const sessions = plan(courses, subjects, S().states, S().blocks.concat(recurring), { ...CFG, startDay: S().restart_day || '' }, today());
     // Chaque créneau révise la séance PRÉCÉDENTE (ce qu'on a vu) avant la suivante : cours → à apprendre, TD → exercices à refaire.
     const pairs = new Map();
     const prepared = courses.map(c => ({ ...c, startMs: dtToMs(c.start), day: c.start.slice(0, 10) }));
@@ -442,6 +442,18 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       ensureSubjects([...subjects]);
       store.save();
       return { ok: true, added, skipped: (Array.isArray(body.courses) ? body.courses.length : 0) - added };
+    }
+    if (method === 'POST' && p === '/api/restart') {               // repartir de zéro : créneaux (faits, manqués, déplacés, retards) et/ou confiance
+      let n = 0;
+      if (body.sessions) {
+        n = Object.keys(S().states).length;
+        S().states = {};
+        for (const s of Object.values(S().subjects)) s.backlog = 0;
+        S().restart_day = today();                                   // plus aucun créneau avant aujourd'hui : pas de faux retard
+      }
+      if (body.confidence) S().confidence = {};
+      store.save();
+      return { ok: true, cleared: n };
     }
     if (method === 'POST' && p === '/api/confidence') {            // note de confiance 1 (fragile) à 3 (solide) pour une matière
       const key = findSubject(body.subject), level = Number(body.level);

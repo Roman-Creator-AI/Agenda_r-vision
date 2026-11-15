@@ -6,6 +6,7 @@ import { extractText, kindOf, ACCEPT } from './extract.js';
 import { openPdf, mountPages } from './pdfview.js';
 import * as AI from './ai.js';
 import * as SRS from './srs.js';
+import { startCard } from './srs.js';
 import { mdToHtml } from './md.js';
 import { busyIntervals, freeSlot, spreadSessions, prioritize } from './scheduling.js';
 import { buildIcs } from './ics-export.js';
@@ -1600,6 +1601,32 @@ async function shareText(text, url) {
   if (navigator.share) { try { await navigator.share({ text, ...(url ? { url } : {}) }); return; } catch (e) { if (e.name === 'AbortError') return; } }
   await navigator.clipboard.writeText(url ? `${text}\n${url}` : text); toast('Copié : colle-le dans une conversation');
 }
+
+/* ---------------------------------------------------------------- repartir de zéro */
+/** Décoche toutes les tâches `- [x]` des notes ; renvoie le nombre de tâches décochées. */
+function uncheckTasks() {
+  const n = readNotes(); let k = 0;
+  for (const d of Object.keys(n.days)) n.days[d] = n.days[d].split('\n').map(l => { const m = l.match(TASK_RE); if (m && m[2] !== ' ') { k++; return `${m[1]}[ ] ${m[3]}`; } return l; }).join('\n');
+  if (k) writeNotes(n);
+  return k;
+}
+$('#rs-go').onclick = guard(async () => {
+  const on = id => $(`#${id}`).checked, picked = ['rs-sessions', 'rs-tasks', 'rs-stats', 'rs-cards', 'rs-conf'].filter(on);
+  if (!picked.length) return toast('Coche au moins une case.', false);
+  if (!confirm('Repartir de zéro avec les éléments cochés ? Cette action est définitive' + (on('rs-backup') ? ' (une sauvegarde va d\'abord être téléchargée).' : ' et aucune sauvegarde ne sera faite.'))) return;
+  if (on('rs-backup')) await exportBackup();
+  const parts = [];
+  if (on('rs-sessions') || on('rs-conf')) { await api('/api/restart', { method: 'POST', json: { sessions: on('rs-sessions'), confidence: on('rs-conf') } }); if (on('rs-sessions')) parts.push('créneaux'); if (on('rs-conf')) parts.push('confiance'); }
+  if (on('rs-tasks')) { const k = uncheckTasks(); parts.push(plural(k, 'tâche décochée', 'tâches décochées')); }
+  if (on('rs-stats')) { lsDel(STATS_KEY); lsDel(GOALHIT_KEY); parts.push('statistiques'); }
+  if (on('rs-cards')) {
+    const t = todayIso(); let k = 0;
+    for (const r of await library.withCards()) { const cards = cleanCards(r.cards).map(c => ({ ...c, srs: { ...startCard(t), due: t } })); k += cards.length; await library.update(r.id, { cards }); }
+    parts.push(plural(k, 'fiche remise à zéro', 'fiches remises à zéro'));
+  }
+  $('#rs-msg').textContent = `Remis à zéro : ${parts.join(', ')}.`;
+  toast('Remise à zéro effectuée'); await refresh();
+});
 
 /* ---------------------------------------------------------------- partage avec un camarade */
 $('#share-name').value = lsGet(NAME_KEY) || '';

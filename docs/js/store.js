@@ -9,7 +9,7 @@ export const emptyState = () => ({
   version: VERSION,
   settings: { ics_url: '', last_sync: '', last_sync_count: '', last_error: '' },
   courses: [], subjects: {}, states: {}, blocks: [], next_block_id: 1,
-  recurring_blocks: [], custom_courses: [], next_item_id: 1, confidence: {},   // blocages hebdomadaires, cours ajoutés à la main
+  recurring_blocks: [], custom_courses: [], next_item_id: 1, confidence: {}, restart_day: '',   // blocages hebdomadaires, cours ajoutés à la main
 });
 
 const HEX = /^#[0-9a-fA-F]{6}$/, DAYRE = /^\d{4}-\d{2}-\d{2}$/, HM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -69,6 +69,7 @@ export function normalize(raw) {
                  weekdays: c.frequency === 'weekly' ? weekdays(c.weekdays) : [], every: Math.round(num(c.every, 1, 8, 1)),
                  from: c.from, until: optDay(c.until) }));
   s.confidence = cleanConfidence(raw.confidence);
+  s.restart_day = DAYRE.test(raw.restart_day) ? raw.restart_day : '';
   s.next_item_id = Math.max(Math.round(num(raw.next_item_id, 1, 1e9, 1)),
     ...s.recurring_blocks.map(b => b.id + 1), ...s.custom_courses.map(c => c.id + 1), 1);
   return s;

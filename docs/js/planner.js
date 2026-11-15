@@ -116,7 +116,7 @@ function subjectCfg(subjects, name) {
  */
 export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, today) {
   const courses = prepareCourses(rawCourses);
-  const minDay = addDays(today, -cfg.historyDays);
+  const minDay = [addDays(today, -cfg.historyDays), cfg.startDay || ''].sort().pop();      // startDay : « repartir de zéro » (absent = comportement historique)
   const busy = new Map();
   const addBusy = (day, s, e) => { if (!busy.has(day)) busy.set(day, []); busy.get(day).push([s, e]); };
 

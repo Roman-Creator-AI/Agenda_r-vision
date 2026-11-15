@@ -287,6 +287,20 @@
         celles d'une app ajoutée à l'écran d'accueil.
       </div>
 
+      <div id="restart-card" class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-1">🔄 Repartir de zéro</h2>
+        <p class="text-sm text-slate-500 mb-3">Remets à zéro ce que tu choisis, sans toucher à ton emploi du temps, à tes cours déposés ni à tes réglages de matières.</p>
+        <div class="grid gap-2 text-sm mb-3">
+          <label class="flex gap-2 items-start"><input type="checkbox" id="rs-sessions" checked> <span><b>Créneaux de révision</b> : tout redevient « à faire », les retards et les créneaux déplacés disparaissent, le planning repart d'aujourd'hui.</span></label>
+          <label class="flex gap-2 items-start"><input type="checkbox" id="rs-tasks" checked> <span><b>Tâches de mes notes</b> : toutes les cases cochées sont décochées.</span></label>
+          <label class="flex gap-2 items-start"><input type="checkbox" id="rs-stats"> <span><b>Statistiques</b> : heures révisées, série de jours et défis (ton objectif est conservé).</span></label>
+          <label class="flex gap-2 items-start"><input type="checkbox" id="rs-cards"> <span><b>Fiches mémoire</b> : toutes redeviennent « à apprendre aujourd'hui ».</span></label>
+          <label class="flex gap-2 items-start"><input type="checkbox" id="rs-conf"> <span><b>Confiance</b> par matière.</span></label>
+        </div>
+        <label class="flex gap-2 items-center text-sm mb-3"><input type="checkbox" id="rs-backup" checked> Télécharger une sauvegarde avant (recommandé)</label>
+        <button type="button" id="rs-go" class="tool tool-primary">🔄 Repartir de zéro</button>
+        <p id="rs-msg" class="text-xs text-slate-500 mt-2"></p>
+      </div>
       <div id="share-card" class="bg-white rounded-xl border border-slate-200 p-5">
         <h2 class="font-semibold mb-1">👥 Partager avec un camarade</h2>
         <p class="text-sm text-slate-500 mb-3">Envoie ton emploi du temps (les 2 prochains mois) par un lien ou un fichier : ton camarade l'ajoute en un clic. Seuls les horaires voyagent, jamais tes cours déposés, tes notes ni ta clé d'assistant.</p>

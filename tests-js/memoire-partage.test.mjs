@@ -114,3 +114,22 @@ test('backend : la confiance d\'une matière fragile augmente son temps de révi
   const saved = JSON.parse((await call('GET', '/api/export')).text).data;                                    // la confiance voyage dans la sauvegarde
   assert.equal(saved.confidence.Maths.length, 2);
 });
+
+test('repartir de zéro : créneaux remis à « à faire », plus de retard ni de créneau passé, emploi du temps intact', async () => {
+  const { call } = await setup();
+  const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\nBEGIN:VEVENT\r\nUID:m@x\r\nSUMMARY:Maths CM\r\nDTSTART:20261105T100000\r\nDTEND:20261105T120000\r\nRRULE:FREQ=WEEKLY;COUNT=6\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+  await call('POST', '/api/upload', { text: ics });
+  let ses = (await call('GET', '/api/agenda')).sessions;
+  assert.ok(ses.some(s => s.day < T), 'au départ : des créneaux sont passés (donc en retard)');
+  await call('PATCH', `/api/sessions/${ses.find(s => s.day >= T).id}`, { status: 'done' });
+  await call('PATCH', `/api/sessions/${ses.find(s => s.day < T).id}`, { status: 'missed' });
+  assert.ok((await call('GET', '/api/subjects'))[0].backlog > 0);
+  const r = await call('POST', '/api/restart', { sessions: true });
+  assert.ok(r.cleared >= 2);
+  ses = (await call('GET', '/api/agenda')).sessions;
+  assert.ok(ses.length > 0 && ses.every(s => s.status === 'pending' && s.day >= T), 'tout est à faire, rien avant aujourd\'hui');
+  assert.equal((await call('GET', '/api/subjects'))[0].backlog, 0);
+  assert.equal((await call('GET', '/api/custom-courses')).length, 0);
+  const saved = JSON.parse((await call('GET', '/api/export')).text).data;
+  assert.equal(saved.restart_day, T);                                                                          // la remise à zéro survit à une sauvegarde
+});

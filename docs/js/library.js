@@ -68,7 +68,7 @@ export class Library {
     return { due, next: upcoming[0] || null, total: all.length };
   }
   /** Cours qui ont des fiches mémoire (sans le texte ni le fichier). */
-  async withCards() { return (await this.b.all()).filter(r => r.cards && r.cards.length).map(({ id, subject, subject_name, name, topic, cards }) => ({ id, subject, subject_name, name, topic, cards })); }
+  async withCards() { return (await this.b.all()).filter(r => r.cards && r.cards.length).map(({ id, subject, subject_name, name, topic, cards, cards_paused }) => ({ id, subject, subject_name, name, topic, cards, cards_paused: !!cards_paused })); }
   get(id) { return this.b.get(Number(id)); }
   async update(id, patch) {
     const r = await this.b.get(Number(id));

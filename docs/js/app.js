@@ -59,10 +59,13 @@ function gauge(load) {
 }
 
 /** Ouvre le bon document d'un créneau : le dernier TD pour des exercices, le dernier cours sinon ; sinon la page de la matière. */
+/** Le document d'une matière qui correspond au type de travail (dernier TD pour des exercices, dernier cours sinon). */
+async function pickDoc(subject, work) {
+  const want = work === 'practice' ? 'td' : 'cours', docs = await library.list(subject);
+  return docs.find(x => (x.topic || 'cours') === want) || docs[0] || null;
+}
 async function openSessionDoc(s, from) {
-  const want = s.work === 'practice' ? 'td' : 'cours';
-  const docs = await library.list(s.subject);
-  const d = docs.find(x => (x.topic || 'cours') === want) || docs[0];
+  const want = s.work === 'practice' ? 'td' : 'cours', d = await pickDoc(s.subject, s.work);
   if (d) show('doc', d.id); else { toast(`Aucun ${want === 'td' ? 'TD' : 'cours'} déposé : ajoute-le ici`); openSubject(s.subject, from); }
 }
 const workPill = s => { const w = WORK[s.work] || WORK.review; return `<span class="work-pill ${esc(s.work || 'review')}" title="${esc(w.action)}">${w.icon} ${w.label}</span>`; };
@@ -120,7 +123,7 @@ function bindSessionActions(root) {
     const wasDone = b.dataset.status === 'done' && sessionIndex[b.dataset.sid];
     if (b.dataset.status === 'missed') toast(`Reporté au cycle suivant · retard de la matière : ${r.backlog}`);
     await refresh();
-    if (wasDone) askConfidence(wasDone.subject);
+    if (wasDone) askConfidence(wasDone.subject, wasDone.work);
   }));
   $$('[data-move]', root).forEach(b => b.onclick = () => openMove(sessionIndex[b.dataset.move]));
   $$('[data-subj]', root).forEach(b => b.onclick = e => { e.stopPropagation(); openSubject(b.dataset.subj, view); });
@@ -226,7 +229,7 @@ function renderTimer() {
     if (d) d.onclick = guard(async () => {
       await api(`/api/sessions/${t.sid}`, { method: 'PATCH', json: { status: 'done' } });
       if (!sessionIndex[t.sid]) sessionIndex[t.sid] = { id: t.sid, subject: t.subject, minutes: t.minutes };
-      logSession(t.sid, 'done'); lsDel(TIMER_KEY); renderTimer(); toast('Créneau marqué comme fait'); await refresh(); askConfidence(t.subject);
+      logSession(t.sid, 'done'); lsDel(TIMER_KEY); renderTimer(); toast('Créneau marqué comme fait'); await refresh(); askConfidence(t.subject, t.work);
     });
   };
   paint(); if (t.end > Date.now()) timerTick = setInterval(paint, 1000);
@@ -1258,7 +1261,7 @@ function renderSrs() {
       <span class="srs-hint">${esc(T().srsHint)}</span>`;
     $('#srs-start').onclick = guard(async () => {
       const day = /^\d{4}-\d{2}-\d{2}$/.test($('#srs-date').value) && $('#srs-date').value <= todayIso() ? $('#srs-date').value : todayIso();
-      doc.srs = await updateSrs(doc.id, () => SRS.startCard(day));
+      doc.srs = await updateSrs(doc.id, () => SRS.startCard(day)); doc.cards_paused = false; await library.update(doc.id, { cards_paused: false });
       toast(SRS.isDue(doc.srs, todayIso()) ? 'Rappels lancés : le premier est à faire dès maintenant' : `Rappels lancés : le premier est ${SRS.dueLabel(doc.srs.due, todayIso())}`); renderSrs();
     });
     return;
@@ -1270,8 +1273,9 @@ function renderSrs() {
     ${docSubjectActive ? '' : '<span class="srs-hint">Cette matière n\'est plus dans tes révisions : ses rappels sont masqués.</span>'}`;
   $('#srs-review').onclick = () => { reviewIntent = String(doc.id); showReviewBar(); };
   $('#srs-stop').onclick = guard(async () => {
-    if (!confirm(T().srsStop)) return;
-    await updateSrs(doc.id, () => null); doc.srs = null; hideReviewBar(); renderSrs();
+    const hasCards = cleanCards(doc.cards).length > 0;
+    if (!confirm(T().srsStop + (hasCards ? '\n\nLes fiches mémoire de ce cours sont aussi mises en pause (tu pourras les réactiver dans « 🃏 Fiches »).' : ''))) return;
+    await updateSrs(doc.id, () => null); doc.srs = null; doc.cards_paused = hasCards; if (hasCards) await library.update(doc.id, { cards_paused: true }); hideReviewBar(); renderSrs();
   });
 }
 
@@ -1433,8 +1437,10 @@ async function refreshStatus() {
   const s = await api('/api/settings');
   $('#sync-status').textContent = s.last_sync ? `Sync : ${new Date(s.last_sync).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}` : 'Pas encore synchronisé';
 }
-const loaders = { dashboard: loadDashboard, calendar: loadCalendar, agenda: loadAgenda, subjects: loadSubjects, sync: loadSync,
+const loaders = { guide: loadGuide, dashboard: loadDashboard, calendar: loadCalendar, agenda: loadAgenda, subjects: loadSubjects, sync: loadSync,
                   notes: loadNotes, subject: loadSubject, doc: loadDoc };
+function loadGuide() { window.scrollTo(0, 0); }
+$$('[data-scroll]').forEach(b => b.onclick = () => document.getElementById(b.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « enfants » : on garde « Matières » allumé
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
 /* ---------------------------------------------------------------- fiches mémoire */
@@ -1452,12 +1458,19 @@ function renderDeck(msg = '') {
   const cards = cleanCards(doc.cards), today = todayIso(), due = cards.filter(c => c.srs.due <= today).length;
   $('#deck-count').textContent = plural(cards.length, 'fiche', 'fiches');
   $('#deck-study').disabled = !due; $('#deck-study').textContent = due ? `▶ Réviser (${due} à revoir)` : '▶ Rien à revoir aujourd\'hui';
+  $('#deck-remind').checked = !doc.cards_paused; $('#deck-wipe').classList.toggle('hidden', !cards.length);
   $('#deck-msg').textContent = msg || (cards.length ? '' : 'Aucune fiche pour l\'instant : fais-les créer par l\'IA à partir du document, ou écris les tiennes.');
   $('#deck-list').innerHTML = cards.map(c => `<li><div class="min-w-0"><b>${esc(c.q)}</b><small>${esc(c.a)}</small><small>prochain rappel : ${esc(SRS.dueLabel(c.srs.due, today))}</small></div>
     <button type="button" data-delcard="${esc(c.id)}" title="Supprimer cette fiche">Supprimer</button></li>`).join('');
   $$('#deck-list [data-delcard]').forEach(b => b.onclick = guard(async () => { await saveCards(cleanCards(doc.cards).filter(c => c.id !== b.dataset.delcard)); renderDeck(); }));
 }
 $('#doc-cards').onclick = guard(openDeck);
+$('#deck-remind').onchange = guard(async e => { doc.cards_paused = !e.target.checked; await library.update(doc.id, { cards_paused: doc.cards_paused }); renderDeck(e.target.checked ? 'Ces fiches reviendront dans tes rappels.' : 'Fiches en pause : elles n\'apparaîtront plus dans tes rappels.'); });
+$('#deck-wipe').onclick = guard(async () => {
+  const n = cleanCards(doc.cards).length;
+  if (!confirm(`Supprimer définitivement les ${n} fiches de ce cours ?`)) return;
+  await saveCards([]); renderDeck('Toutes les fiches ont été supprimées.');
+});
 $('#deck-form').onsubmit = guard(async e => {
   e.preventDefault();
   const r = addCards(doc.cards, [{ q: $('#deck-q').value, a: $('#deck-a').value }], todayIso());
@@ -1506,8 +1519,10 @@ function flashRender() {
     f.done++; f.i++; f.show = false; flashRender();
   }));
 }
+/** Fiches à revoir aujourd'hui : matières actives seulement, et pas les cours dont les rappels sont arrêtés. */
+async function dueFlash() { const keep = await activeKeep(); return dueCards(await library.withCards(), todayIso(), r => !r.cards_paused && keep(r)); }
 async function renderCardsCard() {
-  const el = $('#cards-card'), due = dueCards(await library.withCards(), todayIso(), await activeKeep());
+  const el = $('#cards-card'), due = await dueFlash();
   if (!due.length) { el.className = 'hidden'; el.innerHTML = ''; return; }
   const subs = [...new Set(due.map(d => d.subject))];
   el.className = 'cards-card';
@@ -1547,13 +1562,29 @@ async function rate(subject, level) {
 }
 let confTimer = null;
 /** Après un créneau fait : « Comment te sens-tu ? » (barre discrète, disparaît seule). */
-function askConfidence(subject) {
+function askConfidence(subject, work) {
   const bar = $('#conf-bar'); clearTimeout(confTimer);
   bar.className = 'conf-bar';
   bar.innerHTML = `<span>Comment te sens-tu sur <b>${esc(subject)}</b> ?</span>${LEVELS.map(l => `<button type="button" data-lv="${l.v}" title="${l.label}">${l.icon} ${l.label}</button>`).join('')}<button type="button" id="conf-x" aria-label="Passer">✕</button>`;
   const hide = () => { clearTimeout(confTimer); bar.className = 'hidden'; bar.innerHTML = ''; };
-  $$('#conf-bar [data-lv]').forEach(b => b.onclick = guard(async () => { hide(); await rate(subject, Number(b.dataset.lv)); }));
+  $$('#conf-bar [data-lv]').forEach(b => b.onclick = guard(async () => { hide(); await rate(subject, Number(b.dataset.lv)); await askLater(subject, work); }));
   $('#conf-x').onclick = hide; confTimer = setTimeout(hide, 20000);
+}
+/** Deuxième question après un créneau : « Te le rappeler plus tard ? » (seulement si un document est déposé et qu'aucun rappel n'est déjà lancé). */
+async function askLater(subject, work) {
+  const d = await pickDoc(subject, work);
+  if (!d || d.srs) return;
+  const bar = $('#conf-bar'); clearTimeout(confTimer);
+  bar.className = 'conf-bar';
+  bar.innerHTML = `<span>🔁 Te rappeler <b>${esc(d.name)}</b> plus tard, pour mieux le retenir ?</span><button type="button" id="later-yes">Oui, rappelle-moi</button><button type="button" id="later-no">Non merci</button>`;
+  const hide = () => { clearTimeout(confTimer); bar.className = 'hidden'; bar.innerHTML = ''; };
+  $('#later-no').onclick = hide;
+  $('#later-yes').onclick = guard(async () => {
+    const srs = await updateSrs(d.id, () => SRS.startCard(todayIso()));
+    await library.update(d.id, { cards_paused: false });
+    hide(); toast(`Rappel programmé : ${SRS.dueLabel(srs.due, todayIso())}. Tu peux l'arrêter depuis le cours.`); refresh();
+  });
+  confTimer = setTimeout(hide, 20000);
 }
 const confLine = s => {
   if (!s.confidence_n) return '';
@@ -1756,7 +1787,7 @@ foldify($('#view-sync'), ['Importer', 'Sauvegarde', 'Partager', 'Sur ton télép
 async function renderHero(t) {
   const el = $('#hero'), h = new Date().getHours(), hello = h < 5 || h >= 18 ? 'Bonsoir' : h < 12 ? 'Bonjour' : 'Bon après-midi';
   const text = readNotes().days[todayIso()] || '', tasks = text.split('\n').filter(l => { const m = l.match(TASK_RE); return m && m[2] === ' ' && m[3].trim(); }).length;
-  const cards = dueCards(await library.withCards(), todayIso(), await activeKeep()).length;
+  const cards = (await dueFlash()).length;
   const todo = t.todo.filter(s => s.status === 'pending').sort((a, b) => a.start.localeCompare(b.start)), minutes = todo.reduce((n, s) => n + s.minutes, 0);
   const bits = [todo.length && `${plural(todo.length, 'créneau', 'créneaux')} (${fmtDur(minutes)})`, tasks && plural(tasks, 'tâche', 'tâches'), cards && plural(cards, 'fiche', 'fiches')].filter(Boolean);
   const timer = readTimer(), next = t.upcoming[0];
@@ -1777,10 +1808,11 @@ function renderOnboarding(subjectsCount) {
   if (st.hide || steps.every(s => s.done)) { el.className = 'hidden'; el.innerHTML = ''; return; }
   el.className = 'onboard';
   el.innerHTML = `<div class="flex items-baseline gap-2"><h2 class="font-semibold">🚀 Pour bien démarrer</h2><span class="text-xs text-slate-500">${steps.filter(s => s.done).length} / 3</span>
-      <button type="button" id="onb-hide" class="ml-auto text-xs text-slate-500 hover:underline">Masquer</button></div>
+      <button type="button" id="onb-guide" class="ml-auto text-xs text-blue-600 hover:underline">📖 Lire le guide</button><button type="button" id="onb-hide" class="text-xs text-slate-500 hover:underline">Masquer</button></div>
     <ol class="onb-steps">${steps.map((s, i) => `<li class="${s.done ? 'done' : ''}"><span class="onb-n">${s.done ? '✓' : i + 1}</span><div class="min-w-0 flex-1"><b>${s.t}</b><small>${s.d}</small></div>
       ${s.done ? '' : `<button type="button" class="rv-btn" data-go="${s.view}">Ouvrir</button>`}</li>`).join('')}</ol>`;
   $$('#onboard-card [data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
+  $('#onb-guide').onclick = () => show('guide');
   $('#onb-hide').onclick = () => { lsSet(ONB_KEY, JSON.stringify({ ...st, hide: true })); renderOnboarding(subjectsCount); };
 }
 

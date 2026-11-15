@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1e293b">
+  <script>try{var t=localStorage.getItem('campass-theme');if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}</script>
   <meta name="robots" content="noindex">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -32,6 +33,7 @@
       <button data-view="sync" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🔄 Import &amp; sauvegarde</button>
     </nav>
     <div id="sync-status" class="hidden md:block mt-6 text-xs text-slate-500"></div>
+    <button id="theme-btn" type="button" class="theme-btn" title="Changer l'apparence"></button>
   </aside>
 
   <main class="flex-1 p-4 md:p-8 max-w-6xl w-full">
@@ -40,9 +42,10 @@
     <!-- Tableau de bord -->
     <section id="view-dashboard" class="view space-y-6">
       <div id="backup-banner" class="hidden"></div>
+      <div id="hero" class="hero"></div>
+      <div id="onboard-card" class="hidden"></div>
       <div id="review-card-dash" class="hidden"></div>
-      <div id="cards-card" class="hidden"></div>
-      <div class="grid md:grid-cols-3 gap-4">
+      <div class="grid md:grid-cols-3 gap-4 items-start">
         <div class="md:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
           <div class="flex items-center justify-between mb-3">
             <h2 class="font-semibold">À réviser aujourd'hui</h2>
@@ -59,6 +62,7 @@
           <ul id="upcoming" class="space-y-1 text-sm"></ul>
         </div>
       </div>
+      <div id="cards-card" class="hidden"></div>
       <div id="tasks-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
         <div class="flex items-baseline gap-2 mb-2"><h2 class="font-semibold">✅ Mes tâches du jour</h2><span id="tasks-sub" class="text-xs text-slate-500"></span>
           <button data-view="notes" class="ml-auto text-sm text-blue-600 hover:underline">Ouvrir mes notes →</button></div>
@@ -68,15 +72,15 @@
         <h2 class="font-semibold mb-3">🎯 Examens à venir</h2>
         <ul id="exam-list" class="space-y-2"></ul>
       </div>
-      <div id="priority-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
-        <div class="flex items-baseline gap-2 mb-1"><h2 class="font-semibold">À réviser en priorité</h2><span id="priority-sub" class="text-xs text-slate-500"></span></div>
+      <details id="priority-card" class="fold hidden">
+        <summary><h2 class="font-semibold">À réviser en priorité</h2><span id="priority-sub" class="text-xs text-slate-500"></span></summary>
         <p class="text-sm text-slate-500 mb-3">Les matières en retard d'abord, puis celles dont le prochain cours est le plus proche.</p>
         <ol id="priority-list" class="space-y-2"></ol>
-      </div>
-      <div id="stats-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
-        <h2 class="font-semibold mb-3">📊 Mes statistiques</h2>
+      </details>
+      <details id="stats-card" class="fold hidden">
+        <summary><h2 class="font-semibold">📊 Mes statistiques et défis</h2><span id="stats-sub" class="text-xs text-slate-500"></span></summary>
         <div id="stats-body"></div>
-      </div>
+      </details>
       <div class="bg-white rounded-xl border border-slate-200 p-5">
         <div class="flex items-center justify-between mb-3">
           <h2 class="font-semibold">Cette semaine</h2>

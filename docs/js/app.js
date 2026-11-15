@@ -177,8 +177,9 @@ async function loadDashboard() {
   const [t, w, subs] = await Promise.all([api('/api/today'), api(`/api/week?start=${iso(monday(new Date()))}`), api('/api/subjects')]);
   $('#today-date').textContent = fmtLong(t.date);
   index(t.todo); index(t.upcoming);
+  renderHero(t).catch(() => {}); renderOnboarding(subs.length);
   $('#todo-list').innerHTML = t.todo.length ? t.todo.map(s => sessionRow(s)).join('')
-    : '<li class="text-sm text-slate-500 p-3">🎉 Rien à réviser aujourd\'hui. Importez votre emploi du temps si c\'est inattendu.</li>';
+    : '<li class="text-sm text-slate-500 p-2">🎉 Rien à réviser aujourd\'hui. Si c\'est inattendu, vérifie que ton emploi du temps est bien importé.</li>';
   $('#today-gauge').innerHTML = gauge(t.load);
   const indebted = subs.filter(x => x.backlog > 0 && x.enabled);
   $('#debt-list').innerHTML = indebted.length ? indebted.map(x =>
@@ -1573,6 +1574,7 @@ async function renderStats() {
   const wk = weekByDay(log, today), rate = doneRate(a.sessions, today), st = streak(log, today), goal = readGoal();
   const active = subs.filter(s => s.enabled).map(s => s.name);
   card.classList.toggle('hidden', !active.length && !wk.total);
+  $('#stats-sub').textContent = `${fmtDur(wk.total)} cette semaine · ${st} 🔥`;
   const max = Math.max(1, ...wk.subjects.map(x => x.minutes));
   const color = Object.fromEntries(subs.map(s => [s.name, s.color]));
   const late = a.sessions.filter(s => s.status === 'pending' && s.day < today).length;
@@ -1712,11 +1714,82 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   navigator.serviceWorker.register('sw.js').then(() => renderPhoneCard()).catch(() => {});
 }
 
+/* ---------------------------------------------------------------- refonte : apparence, accueil, sections repliables */
+const THEME_KEY = 'campass-theme', FOLD_KEY = 'campass-fold', ONB_KEY = 'campass-onboard';
+const THEMES = [['auto', '🌓 Auto'], ['light', '☀️ Clair'], ['dark', '🌙 Sombre']];
+const themePref = () => { const t = lsGet(THEME_KEY); return t === 'light' || t === 'dark' ? t : 'auto'; };
+function applyTheme() {
+  const p = themePref(), dark = p === 'dark' || (p === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.classList.toggle('dark', dark);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#12161d' : '#1e293b');
+  const b = $('#theme-btn'); if (b) b.textContent = THEMES.find(t => t[0] === p)[1];
+}
+$('#theme-btn').onclick = () => { const i = THEMES.findIndex(t => t[0] === themePref()); lsSet(THEME_KEY, THEMES[(i + 1) % 3][0]); applyTheme(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+applyTheme();
+
+const readFolds = () => { try { return JSON.parse(lsGet(FOLD_KEY) || '{}') || {}; } catch { return {}; } };
+/** Les <details> mémorisent leur état (ouvert / fermé) d'une visite à l'autre. */
+function rememberFold(det, defaultOpen) {
+  const f = readFolds(); det.open = det.id in f ? !!f[det.id] : defaultOpen;
+  det.addEventListener('toggle', () => { const x = readFolds(); x[det.id] = det.open; lsSet(FOLD_KEY, JSON.stringify(x)); });
+}
+/** Transforme les cartes d'une page en sections repliables (les éléments sont déplacés, pas copiés : leurs boutons restent actifs). */
+function foldify(root, order, openTitles) {
+  const dets = [];
+  [...root.children].forEach(card => {
+    const h2 = card.classList.contains('bg-white') ? card.querySelector(':scope > h2') : null;
+    if (!h2) return;
+    const title = h2.textContent.trim(), det = document.createElement('details');
+    det.className = 'fold'; det.id = 'fold-' + fold(title).replace(/\s+/g, '-').slice(0, 30);
+    const sum = document.createElement('summary'); sum.append(h2); h2.className = 'font-semibold';
+    card.classList.remove('bg-white', 'rounded-xl', 'border', 'border-slate-200', 'p-5'); card.classList.add('fold-body');
+    card.replaceWith(det); det.append(sum, card); dets.push([title, det]);
+  });
+  const rank = t => { const i = order.findIndex(o => fold(t).includes(fold(o))); return i < 0 ? 99 : i; };
+  dets.sort((a, b) => rank(a[0]) - rank(b[0])).forEach(([t, d]) => { root.append(d); rememberFold(d, openTitles.some(o => fold(t).includes(fold(o)))); });
+}
+foldify($('#view-sync'), ['Importer', 'Sauvegarde', 'Partager', 'Sur ton téléphone', 'calendrier', 'bloqués', 'cours ajoutés', 'Repartir'], ['Importer', 'Sauvegarde']);
+['#priority-card', '#stats-card'].forEach(sel => rememberFold($(sel), sel === '#stats-card'));
+
+/** En-tête du tableau de bord : salutation, résumé de la journée, bouton « Commencer ». */
+async function renderHero(t) {
+  const el = $('#hero'), h = new Date().getHours(), hello = h < 5 || h >= 18 ? 'Bonsoir' : h < 12 ? 'Bonjour' : 'Bon après-midi';
+  const text = readNotes().days[todayIso()] || '', tasks = text.split('\n').filter(l => { const m = l.match(TASK_RE); return m && m[2] === ' ' && m[3].trim(); }).length;
+  const cards = dueCards(await library.withCards(), todayIso(), await activeKeep()).length;
+  const todo = t.todo.filter(s => s.status === 'pending').sort((a, b) => a.start.localeCompare(b.start)), minutes = todo.reduce((n, s) => n + s.minutes, 0);
+  const bits = [todo.length && `${plural(todo.length, 'créneau', 'créneaux')} (${fmtDur(minutes)})`, tasks && plural(tasks, 'tâche', 'tâches'), cards && plural(cards, 'fiche', 'fiches')].filter(Boolean);
+  const timer = readTimer(), next = t.upcoming[0];
+  el.innerHTML = `<div class="min-w-0"><p class="hero-date">${esc(fmtLong(t.date))}</p><h1 class="hero-title">${hello} 👋</h1>
+    <p class="hero-sum">${bits.length ? `Aujourd'hui : <b>${esc(bits.join(' · '))}</b>` : `Rien de prévu aujourd'hui 🎉${next ? ` Prochaine révision : ${esc(next.subject)}, ${esc(fmtShort(next.day))}.` : ''}`}</p></div>
+    ${timer && timer.end > Date.now() ? `<span class="hero-run">⏱ En cours : ${esc(timer.subject)}</span>` : todo.length ? `<button type="button" id="hero-go" class="hero-go">▶ Commencer · ${esc(todo[0].subject)}</button>` : ''}`;
+  $('#hero-go')?.addEventListener('click', () => { index(todo); startTimer(todo[0]); toast(`Minuteur lancé : ${todo[0].subject} (${fmtDur(todo[0].minutes)})`); renderHero(t); });
+}
+
+/** Premier usage : trois étapes pour démarrer. */
+function renderOnboarding(subjectsCount) {
+  const el = $('#onboard-card'), st = (() => { try { return JSON.parse(lsGet(ONB_KEY) || '{}') || {}; } catch { return {}; } })();
+  const steps = [
+    { done: subjectsCount > 0, view: 'sync', t: 'Importe ton emploi du temps', d: 'Un fichier .ics exporté de Campass (ou un lien d\'abonnement).' },
+    { done: !!st.subjects, view: 'subjects', t: 'Règle tes matières', d: 'Durée des sessions, nombre de chapitres, intensité.' },
+    { done: Object.keys(readLog()).length > 0, view: 'agenda', t: 'Fais ton premier créneau', d: 'Ouvre l\'agenda, lance le minuteur, puis marque-le « Fait ».' },
+  ];
+  if (st.hide || steps.every(s => s.done)) { el.className = 'hidden'; el.innerHTML = ''; return; }
+  el.className = 'onboard';
+  el.innerHTML = `<div class="flex items-baseline gap-2"><h2 class="font-semibold">🚀 Pour bien démarrer</h2><span class="text-xs text-slate-500">${steps.filter(s => s.done).length} / 3</span>
+      <button type="button" id="onb-hide" class="ml-auto text-xs text-slate-500 hover:underline">Masquer</button></div>
+    <ol class="onb-steps">${steps.map((s, i) => `<li class="${s.done ? 'done' : ''}"><span class="onb-n">${s.done ? '✓' : i + 1}</span><div class="min-w-0 flex-1"><b>${s.t}</b><small>${s.d}</small></div>
+      ${s.done ? '' : `<button type="button" class="rv-btn" data-go="${s.view}">Ouvrir</button>`}</li>`).join('')}</ol>`;
+  $$('#onboard-card [data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
+  $('#onb-hide').onclick = () => { lsSet(ONB_KEY, JSON.stringify({ ...st, hide: true })); renderOnboarding(subjectsCount); };
+}
+
 renderTimer();
 function show(v, p = null) {
   flushNotes();
   if (full.on && v !== 'doc') setFull(false);
   view = loaders[v] ? v : 'dashboard';
+  if (view === 'subjects') { try { const o = JSON.parse(lsGet(ONB_KEY) || '{}') || {}; if (!o.subjects) lsSet(ONB_KEY, JSON.stringify({ ...o, subjects: true })); } catch { /* sans effet */ } }
   param = (view === 'subject' || view === 'doc') && p != null && p !== '' ? String(p) : null;
   if ((view === 'subject' || view === 'doc') && param === null) view = 'subjects';
   $$('.view').forEach(el => el.classList.toggle('hidden', el.id !== `view-${view}`));

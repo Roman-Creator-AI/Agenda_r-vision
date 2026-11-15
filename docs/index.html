@@ -25,6 +25,7 @@
     <h1 class="text-lg font-bold mb-1">📚 Révisions</h1>
     <p class="text-xs text-slate-500 mb-4">Planning J-1 depuis Campass</p>
     <nav class="flex md:flex-col gap-1 overflow-x-auto text-sm">
+      <button data-view="guide" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">📖 Guide</button>
       <button data-view="dashboard" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🏠 Tableau de bord</button>
       <button data-view="calendar" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">🗓️ Calendrier</button>
       <button data-view="agenda" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-slate-100 whitespace-nowrap">📋 Agenda de révision</button>
@@ -40,6 +41,171 @@
     <div id="toast" class="fixed top-4 right-4 z-50 hidden px-4 py-2 rounded-lg text-sm text-white shadow-lg"></div>
 
     <!-- Tableau de bord -->
+    <section id="view-guide" class="view hidden max-w-3xl guide">
+      <h1 class="text-2xl font-bold mb-1">📖 Guide de l'application</h1>
+      <p class="text-slate-500 mb-4">Tout ce qu'il faut savoir pour bien démarrer, et tout ce que l'appli peut faire pour toi.</p>
+      <nav class="guide-toc" aria-label="Sommaire du guide">
+        <button type="button" data-scroll="g-what">À quoi ça sert</button>
+        <button type="button" data-scroll="g-start">Démarrer en 5 minutes</button>
+        <button type="button" data-scroll="g-ics">Importer son emploi du temps</button>
+        <button type="button" data-scroll="g-ai">Activer l'assistant IA</button>
+        <button type="button" data-scroll="g-docs">Déposer ses cours</button>
+        <button type="button" data-scroll="g-plan">Le planning de révision</button>
+        <button type="button" data-scroll="g-memo">Mieux retenir</button>
+        <button type="button" data-scroll="g-tools">Outils du quotidien</button>
+        <button type="button" data-scroll="g-data">Données, sauvegarde, partage</button>
+        <button type="button" data-scroll="g-faq">Questions fréquentes</button>
+      </nav>
+
+      <article id="g-what" class="guide-sec">
+        <h2>🎯 À quoi ça sert</h2>
+        <p>L'appli lit ton emploi du temps et place <b>pour toi des créneaux de révision la veille de chaque cours</b> (« J-1 ») : tu révises ce qui a été vu à la séance précédente juste avant la suivante, quand c'est le plus utile pour t'en souvenir.</p>
+        <ul>
+          <li><b>Cours magistral (CM)</b> : des choses à <b>apprendre</b> (📖). <b>TD / TP</b> : des <b>exercices</b> à refaire (✏️). L'appli les distingue partout.</li>
+          <li>Avant un <b>examen</b> (🎯), elle ajoute des créneaux dans les 14 jours qui précèdent.</li>
+          <li>Tout reste <b>chez toi</b> : pas de compte, pas de serveur. Tes données sont enregistrées dans ton navigateur, sur cet appareil.</li>
+        </ul>
+      </article>
+
+      <article id="g-start" class="guide-sec">
+        <h2>🚀 Démarrer en 5 minutes</h2>
+        <ol class="guide-steps">
+          <li><b>Importe ton emploi du temps</b> (section suivante) : onglet « Import &amp; sauvegarde ».</li>
+          <li><b>Choisis tes matières</b> : onglet « Matières » → « Choisir les matières à réviser », puis règle la durée d'une session et le nombre de chapitres pour chacune (« Réglages du planning »).</li>
+          <li><b>Ouvre l'« Agenda de révision »</b> : tu y vois tes créneaux jour par jour. Tu peux en déplacer un en l'attrapant (à la souris, ou au doigt avec la poignée ⠿).</li>
+          <li><b>Révise</b> : « ▶ Commencer » lance un minuteur, « 📂 Ouvrir » ouvre le bon cours ou TD, « ✓ Fait » valide le créneau.</li>
+          <li><b>Reviens chaque jour</b> sur le tableau de bord : le bandeau du haut résume ta journée.</li>
+        </ol>
+      </article>
+
+      <article id="g-ics" class="guide-sec">
+        <h2>📅 Importer son emploi du temps (fichier .ics)</h2>
+        <p>L'appli a besoin de ton emploi du temps au format <b>.ics</b> (le format standard des agendas). Deux façons de faire :</p>
+        <h3>Méthode 1 : le fichier .ics (recommandée, ça marche toujours)</h3>
+        <ol class="guide-steps">
+          <li>Dans le site de ton école (Campass / Geode), ouvre ton <b>emploi du temps</b> et cherche une option d'<b>export</b> du calendrier (selon les écoles : « Exporter », « Export ICS / iCal », « S'abonner au calendrier »). L'intitulé exact varie : si tu ne la trouves pas, demande à ton administration ou à un camarade.</li>
+          <li>Télécharge le fichier : il se termine par <b>.ics</b> (sur téléphone, il arrive dans « Téléchargements » ou « Fichiers »).</li>
+          <li>Dans l'appli, ouvre l'onglet <b>🔄 Import &amp; sauvegarde</b>, section « Importer mon emploi du temps ».</li>
+          <li>Clique sur « Choisir un fichier », sélectionne ton .ics : un message confirme <i>« N cours importés (M matières) »</i>.</li>
+          <li>Va dans « Matières » : tes matières apparaissent, il ne reste qu'à choisir lesquelles réviser.</li>
+        </ol>
+        <h3>Méthode 2 : le lien d'abonnement</h3>
+        <p>Si ton école te donne un <b>lien</b> (commençant par https:// ou webcal://), colle-le dans « Ou utiliser un lien d'abonnement » puis « Synchroniser maintenant ». Certains serveurs refusent d'être lus depuis un autre site : un message d'erreur s'affiche alors, et il faut utiliser la méthode 1.</p>
+        <h3>Mettre à jour</h3>
+        <p>Ton emploi du temps a changé ? Réimporte simplement un nouveau fichier : il remplace l'ancien. Tes créneaux faits, tes cours déposés et tes réglages sont conservés.</p>
+        <h3>Si ça ne marche pas</h3>
+        <ul>
+          <li><i>« Fichier ICS illisible »</i> ou <i>« Ce fichier n'est pas un calendrier ICS »</i> : le fichier est abîmé ou n'est pas un .ics. Réexporte-le (5 Mo maximum) en choisissant une période qui contient des cours.</li>
+          <li>Tu n'as pas d'accès à l'export ? Tu peux aussi <b>ajouter des cours à la main</b> (onglet Import &amp; sauvegarde → « Mes cours ajoutés »).</li>
+          <li>Un camarade a déjà son planning ? Il peut te l'envoyer : voir « Partager avec un camarade » plus bas.</li>
+        </ul>
+      </article>
+
+      <article id="g-ai" class="guide-sec">
+        <h2>🤖 Activer l'assistant IA</h2>
+        <p>L'assistant résume tes cours, répond à tes questions, crée des fiches mémoire et corrige ton « rappel libre ». <b>Il n'y a rien à télécharger ni à installer</b> : il faut seulement une <b>clé API</b>, une sorte de mot de passe personnel qui permet à l'appli d'utiliser un service d'IA (Claude ou Gemini) <b>avec ton propre compte</b>.</p>
+        <h3>Étape 1 : obtenir une clé</h3>
+        <div class="guide-two">
+          <div><h4>Gemini (Google)</h4>
+            <ol>
+              <li>Va sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a>.</li>
+              <li>Connecte-toi avec ton compte Google.</li>
+              <li>Clique sur « Créer une clé API » (Create API key) et valide.</li>
+              <li>Copie la clé affichée (une longue suite de lettres et de chiffres).</li>
+            </ol>
+            <p class="text-xs">Google propose en général une offre gratuite avec des limites d'usage ; les conditions peuvent changer, vérifie-les sur le site.</p></div>
+          <div><h4>Claude (Anthropic)</h4>
+            <ol>
+              <li>Va sur <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com/settings/keys</a>.</li>
+              <li>Crée un compte (ou connecte-toi) et ajoute un petit crédit de départ : l'usage est <b>facturé à la consommation</b>.</li>
+              <li>Clique sur « Create Key », donne-lui un nom (ex. « Révisions »).</li>
+              <li>Copie la clé tout de suite : elle ne sera plus affichée ensuite.</li>
+            </ol>
+            <p class="text-xs">Un résumé ou une réponse coûte généralement très peu ; consulte la grille de prix sur le site.</p></div>
+        </div>
+        <h3>Étape 2 : la coller dans l'appli</h3>
+        <ol class="guide-steps">
+          <li>Onglet « Matières » → clique sur une matière → ouvre un cours que tu as déposé.</li>
+          <li>À droite (en bas sur téléphone), dans le panneau « Assistant », clique sur l'icône <b>⚙️ Réglages</b>.</li>
+          <li>Choisis le <b>service</b> (Claude ou Gemini), colle ta clé dans « Clé API », puis « Enregistrer ».</li>
+          <li>L'assistant génère un résumé : c'est prêt. Tu peux aussi lui poser des questions.</li>
+        </ol>
+        <div class="guide-note"><b>🔒 Confidentialité.</b> La clé reste uniquement dans ton navigateur et n'est jamais incluse dans une sauvegarde ni un partage. Le texte du cours que tu consultes est envoyé directement au service choisi, comme quand tu utilises ce service toi-même. Ne saisis pas ta clé sur un ordinateur partagé, et ne la communique à personne ; en cas de doute, supprime-la sur le site du service et crée-en une autre.</div>
+        <h3>Ça ne marche pas ?</h3>
+        <ul>
+          <li><i>« Clé API refusée »</i> : recopie la clé en entier, sans espace, et vérifie le service choisi.</li>
+          <li><i>« Quota ou limite de débit atteint »</i> : tu as atteint la limite gratuite (Gemini) ou ton crédit est épuisé (Claude) ; réessaie plus tard ou ajoute du crédit.</li>
+          <li>Sans clé, tout le reste de l'appli fonctionne : seules les fonctions d'IA sont désactivées (les fiches se saisissent alors à la main).</li>
+        </ul>
+      </article>
+
+      <article id="g-docs" class="guide-sec">
+        <h2>📂 Déposer ses cours</h2>
+        <ul>
+          <li>Onglet « Matières » → une matière → <b>« Mes cours »</b> : dépose tes fichiers <b>PDF, Word (.docx), PowerPoint (.pptx), .txt ou .md</b>.</li>
+          <li>Indique si c'est un <b>cours</b> (à apprendre) ou un <b>TD / exercices</b> : l'appli le devine d'après le nom du fichier (« TD3.pdf »), tu peux corriger.</li>
+          <li>Un document s'ouvre dans une page de lecture ; un PDF en diapositives s'affiche page par page. <b>Les PDF scannés (images sans texte) ne sont pas lisibles</b> par l'assistant.</li>
+          <li>Depuis l'agenda ou le tableau de bord, « 📂 Ouvrir » ouvre directement le bon document pour le créneau.</li>
+          <li>Les fichiers restent sur ton appareil et ne sont pas inclus dans la sauvegarde .json : garde les originaux.</li>
+        </ul>
+      </article>
+
+      <article id="g-plan" class="guide-sec">
+        <h2>🗓️ Le planning de révision</h2>
+        <ul>
+          <li><b>Calendrier</b> : ta semaine avec les cours et les créneaux de révision (pointillés).</li>
+          <li><b>Agenda de révision</b> : la liste jour par jour. Déplace un créneau en le faisant glisser vers un autre jour ; « Modifier » permet de choisir l'heure ; « ✓ Fait » / « × Non fait » valident.</li>
+          <li><b>Retards</b> : un créneau non fait passe en retard ; « Tout replacer automatiquement » les répartit sur les jours les moins chargés.</li>
+          <li><b>Réglages par matière</b> : durée d'une session, durée des séances de TD, nombre de chapitres, intensité. Une matière sur laquelle tu te sens fragile reçoit automatiquement un peu plus de temps.</li>
+          <li><b>Créneaux bloqués</b> : indique tes indisponibilités (sport, job…) pour que rien ne soit placé dessus.</li>
+          <li><b>Mode examen</b> : pour un examen détecté dans ton emploi du temps, plus de créneaux et un compte à rebours sur le tableau de bord.</li>
+          <li><b>Export calendrier</b> : tes créneaux peuvent être ajoutés à Google Agenda, Apple Calendrier ou Outlook (fichier .ics, onglet Import &amp; sauvegarde).</li>
+        </ul>
+      </article>
+
+      <article id="g-memo" class="guide-sec">
+        <h2>🧠 Mieux retenir</h2>
+        <ul>
+          <li><b>Rappel libre</b> (bouton « 🧠 » dans un cours) : tu écris de mémoire ce que tu retiens, puis l'IA (ou le résumé du cours) te montre ce qui manque. C'est la méthode la plus efficace.</li>
+          <li><b>Fiches mémoire</b> (« 🃏 Fiches ») : questions/réponses créées par l'IA ou écrites par toi, revues à intervalles de plus en plus espacés selon ta réponse (oublié, difficile, bien, facile).</li>
+          <li><b>Rappels espacés d'un cours</b> : après avoir révisé, tu peux demander à être <b>rappelé plus tard</b> de ce cours pour mieux t'en souvenir. C'est toi qui décides, cours par cours : tu peux les <b>activer ou les arrêter à tout moment</b> (bouton « Arrêter les rappels » dans le cours, ou la proposition qui s'affiche après un créneau fait). Arrêter les rappels met aussi en pause les fiches du cours ; tu peux aussi supprimer les fiches elles-mêmes.</li>
+          <li><b>Confiance</b> : après un créneau, note ton niveau (😕 🙂 💪) ; l'appli ajuste le temps de révision de la matière.</li>
+          <li><b>Quiz</b> : l'assistant te pose des questions sur le cours.</li>
+        </ul>
+      </article>
+
+      <article id="g-tools" class="guide-sec">
+        <h2>🧰 Outils du quotidien</h2>
+        <ul>
+          <li><b>Bandeau « Aujourd'hui »</b> : résumé de ta journée et bouton « ▶ Commencer ».</li>
+          <li><b>Minuteur</b> : un compte à rebours pendant ton créneau ; à la fin, il te propose « ✓ Fait ».</li>
+          <li><b>Notes</b> : un espace par jour pour écrire ce que tu dois faire. Les lignes <code>- [ ] tâche</code> deviennent des tâches à cocher sur le tableau de bord. Une feuille blanche libre est aussi disponible.</li>
+          <li><b>Statistiques et défis</b> : heures révisées, taux de créneaux faits, série de jours d'affilée, objectif d'heures par semaine, bilan du dimanche (partageable).</li>
+          <li><b>Mode sombre</b> : bouton sous le menu (Auto / Clair / Sombre).</li>
+        </ul>
+      </article>
+
+      <article id="g-data" class="guide-sec">
+        <h2>💾 Données, sauvegarde, partage</h2>
+        <ul>
+          <li><b>Sauvegarde</b> : « Exporter (.json) » enregistre tes données (planning, réglages, notes, statistiques) ; « Restaurer » les remet, par exemple sur un autre appareil. <b>Exporte régulièrement</b> : si tu vides les données du navigateur, tout est perdu.</li>
+          <li><b>Partager avec un camarade</b> : un lien ou un fichier contenant tes horaires (jamais tes cours, notes ni ta clé). Il l'ouvre et ajoute tes cours en un clic.</li>
+          <li><b>Installer sur ton téléphone</b> : onglet Import &amp; sauvegarde → « Sur ton téléphone ». Sur iPhone : bouton Partager de Safari → « Sur l'écran d'accueil ». Sur Android / Chrome : « Installer l'appli ». Elle fonctionne ensuite <b>sans connexion</b>.</li>
+          <li><b>Repartir de zéro</b> : remet à zéro, au choix, les créneaux, les tâches, les statistiques, les fiches ou la confiance, sans toucher à ton emploi du temps.</li>
+        </ul>
+      </article>
+
+      <article id="g-faq" class="guide-sec">
+        <h2>❓ Questions fréquentes</h2>
+        <details><summary>Mes données sont-elles envoyées quelque part ?</summary><p>Non, sauf si tu utilises l'assistant IA : dans ce cas, le texte du cours consulté part vers le service que tu as choisi (Claude ou Gemini). Sinon tout reste dans ton navigateur.</p></details>
+        <details><summary>Je retrouve mes données sur mon téléphone et mon ordinateur ?</summary><p>Pas automatiquement : chaque appareil a ses propres données. Exporte une sauvegarde (.json) sur l'un et restaure-la sur l'autre.</p></details>
+        <details><summary>J'ai changé de navigateur et tout a disparu.</summary><p>Les données sont propres à chaque navigateur. Restaure ta dernière sauvegarde .json (onglet Import &amp; sauvegarde → Restaurer).</p></details>
+        <details><summary>Un créneau tombe à une mauvaise heure.</summary><p>Clique sur « Modifier » pour choisir l'heure, ou ajoute un créneau bloqué pour que rien ne soit placé à cet endroit.</p></details>
+        <details><summary>Je n'ai plus besoin d'une matière.</summary><p>Onglet Matières → « Ne plus réviser » : ses créneaux, fiches et rappels disparaissent des écrans (tu peux la réactiver quand tu veux).</p></details>
+        <details><summary>L'appli est-elle gratuite ?</summary><p>Oui. Seul l'assistant IA peut avoir un coût, selon le service et l'offre que tu as choisis avec ta propre clé.</p></details>
+      </article>
+    </section>
+
     <section id="view-dashboard" class="view space-y-6">
       <div id="backup-banner" class="hidden"></div>
       <div id="hero" class="hero"></div>
@@ -438,6 +604,7 @@
         <button type="button" id="deck-gen" class="tool tool-primary">✨ Créer des fiches avec l'IA</button>
         <button type="button" id="deck-study" class="tool">▶ Réviser celles du jour</button>
       </div>
+      <label class="deck-opt"><input type="checkbox" id="deck-remind" checked> 🔔 Me rappeler ces fiches (décoche pour les mettre en pause)</label>
       <p id="deck-msg" class="quiz-note"></p>
       <form id="deck-form" class="deck-form">
         <input id="deck-q" placeholder="Question (ex. : Définition d'une dérivée)" maxlength="500" required>
@@ -445,6 +612,7 @@
         <button type="submit" class="tool">+ Ajouter ma fiche</button>
       </form>
       <ul id="deck-list" class="deck-list"></ul>
+      <button type="button" id="deck-wipe" class="deck-wipe hidden">🗑 Supprimer toutes les fiches de ce cours</button>
     </div>
   </dialog>
   <dialog id="flash-dialog" class="quiz-dialog" aria-labelledby="flash-title">

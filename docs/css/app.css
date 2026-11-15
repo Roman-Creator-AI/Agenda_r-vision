@@ -548,6 +548,16 @@ html.dark .rv-btn-primary { background: #352cca; border-color: #352cca; color: #
 html.dark .tool-primary:hover,
 html.dark .rv-btn-primary:hover { background: #5e56c5; }
 html.dark .nav-btn.active { background: #352cca; }
+html.dark .deck-wipe { color: #e65858; }
+html.dark .guide-toc button { border-color: #324050; background: #191b1f; }
+html.dark .guide-toc button:hover { background: #051442; border-color: #1e21b3; }
+html.dark .guide-sec { background: #191b1f; border-color: #232e3d; }
+html.dark .guide-sec a { color: #4f46e5; }
+html.dark .guide-sec code { background: #182532; }
+html.dark .guide-two > div { border-color: #232e3d; background: #15212c; }
+html.dark .guide-note { background: #051442; border-color: #0a1b62; }
+html.dark .guide-sec details { border-top-color: #212630; }
+html.dark .guide-sec details p { color: #a1adbf; }
 /* <<< fin du thème sombre généré */
 
 /* === retouches du thème sombre (écrites à la main, après le bloc généré) === */
@@ -583,3 +593,27 @@ html.dark .timer-bar { background: #0b1020; color: #fff; border: 1px solid #3642
 html.dark .timer-bar button { color: #fff; } html.dark .timer-bar button.primary { background: #fff; color: #166534; }
 html.dark .onboard { border-color: #3b3f7a; }
 html.dark .bg-slate-900 { background-color: #4f46e5; } html.dark .hover\:bg-slate-700:hover { background-color: #4338ca; }
+
+/* guide, rappels */
+.deck-opt { display: flex; gap: .5rem; align-items: center; font-size: .85rem; margin: .4rem 0; }
+.deck-wipe { margin-top: .75rem; color: #b91c1c; font-size: .8rem; text-decoration: underline; }
+.deck-wipe.hidden { display: none; }
+.guide { padding-bottom: 3rem; }
+.guide-toc { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1.25rem; }
+.guide-toc button { font-size: .8rem; border: 1px solid #cbd5e1; border-radius: 999px; padding: .25rem .75rem; background: #fff; }
+.guide-toc button:hover { background: #eef2ff; border-color: #6366f1; }
+.guide-sec { background: #fff; border: 1px solid #e2e8f0; border-radius: .9rem; padding: 1.1rem 1.4rem; margin-bottom: 1rem; scroll-margin-top: 1rem; line-height: 1.6; font-size: .95rem; }
+.guide-sec h2 { font-size: 1.15rem; font-weight: 700; margin-bottom: .6rem; }
+.guide-sec h3 { font-weight: 600; margin: 1rem 0 .35rem; font-size: .95rem; }
+.guide-sec h4 { font-weight: 600; margin-bottom: .3rem; }
+.guide-sec ul { list-style: disc; padding-left: 1.3rem; display: grid; gap: .35rem; }
+.guide-sec ol { list-style: decimal; padding-left: 1.4rem; display: grid; gap: .35rem; }
+.guide-sec a { color: #4f46e5; text-decoration: underline; }
+.guide-sec code { background: #f1f5f9; padding: 0 .3rem; border-radius: .25rem; font-size: .85em; }
+.guide-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; }
+.guide-two > div { border: 1px solid #e2e8f0; border-radius: .7rem; padding: .8rem 1rem; background: #f8fafc; }
+.guide-note { margin-top: .9rem; padding: .7rem .9rem; border-radius: .6rem; background: #eef2ff; border: 1px solid #c7d2fe; font-size: .88rem; }
+.guide-sec details { border-top: 1px solid #eef0f4; padding: .5rem 0; }
+.guide-sec details summary { cursor: pointer; font-weight: 600; }
+.guide-sec details p { margin-top: .4rem; color: #475569; }
+html.dark .guide-toc { background: #12161d; }

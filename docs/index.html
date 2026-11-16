@@ -159,6 +159,7 @@
           <li><b>Réglages par matière</b> : durée d'une session, durée des séances de TD, nombre de chapitres, intensité. Une matière sur laquelle tu te sens fragile reçoit automatiquement un peu plus de temps.</li>
           <li><b>Créneaux bloqués</b> : indique tes indisponibilités (sport, job…) pour que rien ne soit placé dessus.</li>
           <li><b>Programmer une interro</b> : dans la carte « Examens et interros à venir » du tableau de bord, « ＋ Programmer une interro ou un examen » : choisis la matière, le type, la date et l'heure. Tu peux la modifier (✏️) ou la supprimer (🗑) quand tu veux.</li>
+          <li><b>Ajouter un créneau de révision</b> : dans « À réviser aujourd'hui », « ＋ Ajouter un créneau » : choisis la matière, le jour et la durée, puis une heure parmi celles qui sont libres (jamais pendant un cours, un blocage ou une autre révision). Tu peux le déplacer (« Modifier »), le valider ou le supprimer (🗑) comme les autres.</li>
           <li><b>Mode examen</b> : pour un examen détecté dans ton emploi du temps ou programmé par toi, plus de créneaux et un compte à rebours sur le tableau de bord.</li>
           <li><b>Export calendrier</b> : tes créneaux peuvent être ajoutés à Google Agenda, Apple Calendrier ou Outlook (fichier .ics, onglet Import &amp; sauvegarde).</li>
         </ul>
@@ -218,6 +219,7 @@
           <div class="flex items-center justify-between mb-3">
             <h2 class="font-semibold">À réviser aujourd'hui</h2>
             <span id="today-date" class="text-xs text-slate-500"></span>
+            <button type="button" id="extra-open" class="tool" title="Choisir toi-même un créneau de révision parmi les heures libres">＋ Ajouter un créneau</button>
           </div>
           <ul id="todo-list" class="space-y-2"></ul>
         </div>
@@ -613,6 +615,20 @@
     </section>
   </main>
   <div id="conf-bar" class="hidden" role="status"></div>
+  <dialog id="extra-dialog" class="quiz-dialog" aria-labelledby="extra-title">
+    <div class="quiz-head"><h3 id="extra-title">Ajouter un créneau de révision</h3>
+      <button type="button" class="icon-btn" data-close="extra-dialog" aria-label="Fermer" title="Fermer">✕</button></div>
+    <form id="extra-form" class="quiz-body space-y-3 text-sm">
+      <div class="flex flex-wrap gap-2 items-end">
+        <label class="text-xs text-slate-600">Matière<select name="subject" required class="block border rounded-lg px-2 py-1.5 text-sm"></select></label>
+        <label class="text-xs text-slate-600">Jour<input type="date" name="day" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+        <label class="text-xs text-slate-600">Durée<select name="minutes" class="block border rounded-lg px-2 py-1.5 text-sm"><option value="30">30 min</option><option value="45">45 min</option><option value="60" selected>1 h</option><option value="90">1 h 30</option><option value="120">2 h</option></select></label>
+      </div>
+      <div><p class="text-xs text-slate-600 mb-1">Heures libres ce jour-là (hors cours, blocages et autres révisions)</p>
+        <div id="extra-starts" class="flex flex-wrap gap-2" role="radiogroup" aria-label="Heure de début"></div></div>
+      <div class="quiz-actions" style="justify-content:flex-start"><button type="submit" id="extra-save" class="tool tool-primary" disabled>Ajouter ce créneau</button></div>
+    </form>
+  </dialog>
   <dialog id="deck-dialog" class="quiz-dialog" aria-labelledby="deck-title">
     <div class="quiz-head"><h3 id="deck-title">Fiches</h3><span id="deck-count" class="quiz-count"></span>
       <button type="button" class="icon-btn" data-close="deck-dialog" aria-label="Fermer" title="Fermer">✕</button></div>

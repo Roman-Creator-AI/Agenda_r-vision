@@ -334,3 +334,30 @@ test('interro programmée à la main : apparaît dans les examens, modifiable et
   await call('DELETE', `/api/custom-courses/${ex[0].cid}`);
   assert.equal((await call('GET', '/api/exams')).length, 0);
 });
+
+test('créneau de révision au choix : seulement les heures libres, sans retard si « Non fait »', async () => {
+  const { call } = await setup();
+  await call('POST', '/api/upload', { text: ics() });
+  const day = addDays(TODAY, 5);                                   // jour d'un cours de 10:00 à 12:00
+  const { starts } = await call('GET', `/api/free-slots?day=${day}&minutes=60`);
+  assert.ok(starts.length > 0);
+  const m = h => +h.slice(0, 2) * 60 + +h.slice(3);
+  assert.ok(starts.every(h => m(h) + 60 <= 600 || m(h) >= 720), 'aucune heure ne touche le cours');
+  assert.ok(starts.every(h => m(h) >= 480 && m(h) + 60 <= 1260), 'dans la journée d\'étude');
+
+  const r = await call('POST', '/api/extras', { subject: 'Maths', day, start: '14:00', minutes: 60 });
+  assert.ok(r.id > 0);
+  const mine = (await agenda(call)).find(s => s.extra);
+  assert.equal(mine.day, day); assert.equal(mine.start, `${day}T14:00`); assert.equal(mine.minutes, 60);
+  const after = (await call('GET', `/api/free-slots?day=${day}&minutes=60`)).starts;
+  assert.ok(!after.some(h => m(h) > 14 * 60 - 60 && m(h) < 15 * 60), 'le créneau pris n\'est plus proposé');
+  await rejects(call('POST', '/api/extras', { subject: 'Maths', day, start: '14:30', minutes: 60 }), 409);   // chevauche
+  await rejects(call('POST', '/api/extras', { subject: 'Maths', day, start: '10:30', minutes: 60 }), 409);   // pendant le cours
+  await rejects(call('POST', '/api/extras', { subject: 'Inconnue', day, start: '16:00', minutes: 60 }), 404);
+
+  const b0 = await backlog(call);
+  await call('PATCH', `/api/sessions/${mine.id}`, { status: 'missed' });
+  assert.equal(await backlog(call), b0);                           // pas de retard pour un créneau ajouté à la main
+  await call('DELETE', `/api/extras/${r.id}`);
+  assert.ok(!(await agenda(call)).some(s => s.extra));
+});

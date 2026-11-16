@@ -1,9 +1,9 @@
 // « Backend » exécuté dans le navigateur : mêmes routes et mêmes réponses JSON que l'API Flask
 // (app.py), mais les données vivent dans le localStorage de l'appareil.
-import { DEFAULT_CFG, DEFAULT_SUBJECT, plan, dailyLoad, workload, consecutiveOccurrences } from './planner.js';
+import { DEFAULT_CFG, DEFAULT_SUBJECT, plan, dailyLoad, workload, consecutiveOccurrences, freeGaps } from './planner.js';
 import { workOf, workType } from './kinds.js';
 import { addRating, summary as confSummary, intensityFactor } from './confidence.js';
-import { DAY, addDays, dayToMs, dtToMs, isDay, todayLocal, weekday, pad2 } from './dates.js';
+import { DAY, MIN, addDays, dayToMs, dtToMs, msToDt, hmToMin, isDay, todayLocal, weekday, pad2 } from './dates.js';
 import { IcsError, fetchICS, parseICS } from './ics.js';
 
 export class ApiError extends Error {
@@ -95,13 +95,38 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     const recurring = days.length
       ? S().recurring_blocks.flatMap(rb => recurringBlockDays(rb, addDays(days[0], -1), addDays(days[days.length - 1], 1)))
       : [];
-    const sessions = plan(courses, subjects, S().states, S().blocks.concat(recurring), { ...CFG, startDay: S().restart_day || '' }, today());
+    const sessions = plan(courses, subjects, S().states, S().blocks.concat(recurring), { ...CFG, startDay: S().restart_day || '', extras: S().extras.map(x => ({ ...x, sid: extraSid(x.id) })) }, today());
     // Chaque créneau révise la séance PRÉCÉDENTE (ce qu'on a vu) avant la suivante : cours → à apprendre, TD → exercices à refaire.
     const pairs = new Map();
     const prepared = courses.map(c => ({ ...c, startMs: dtToMs(c.start), day: c.start.slice(0, 10) }));
     for (const [prev, nxt] of consecutiveOccurrences(prepared, CFG.groupBy)) pairs.set(`${String(nxt.subject).toLowerCase()}|${nxt.start}`, { prev, nxt });
     for (const s of sessions) s.src = pairs.get(`${String(s.subject).toLowerCase()}|${s.targetStart}`) || null;
     return { sessions, subjects };
+  }
+
+  const extraSid = id => 'ec' + Number(id).toString(16);       // hexadécimal comme les autres identifiants de créneaux
+
+  /** Plages occupées d'un jour : cours, blocages (ponctuels et hebdomadaires) et révisions déjà planifiées. */
+  function busyOn(day) {
+    const base = dayToMs(day), out = [];
+    for (const c of allCourses()) if (c.start.slice(0, 10) === day) out.push([dtToMs(c.start), dtToMs(c.end)]);
+    for (const b of S().blocks.concat(S().recurring_blocks.flatMap(rb => recurringBlockDays(rb, day, day)))) {
+      if (b.day === day) out.push([base + hmToMin(b.start) * MIN, base + hmToMin(b.end) * MIN]);
+    }
+    for (const s of buildPlan().sessions) if (s.day === day && s.status !== 'missed') out.push([dtToMs(s.start), dtToMs(s.end)]);
+    return out;
+  }
+  /** Heures de début possibles pour un créneau de `minutes` ce jour-là : seulement dans les plages libres (et pas dans le passé). */
+  function freeStarts(day, minutes) {
+    const base = dayToMs(day), winS = base + CFG.dayStart * MIN, winE = base + CFG.dayEnd * MIN, need = minutes * MIN;
+    const nowMs = day === today() ? dtToMs(localIso(now()).slice(0, 16)) : 0;
+    const starts = new Set();
+    for (const [gs, ge] of freeGaps(busyOn(day), winS, winE)) {
+      const first = Math.max(gs, nowMs), cands = [first];
+      for (let t = Math.ceil(first / (30 * MIN)) * 30 * MIN; t < ge; t += 30 * MIN) cands.push(t);
+      for (const t of cands) if (t >= gs && t >= nowMs && t + need <= ge) starts.add(msToDt(t).slice(11, 16));
+    }
+    return [...starts].sort();
   }
 
   const ser = (s, subjects) => ({
@@ -114,9 +139,10 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
     source_kind: s.src ? s.src.prev.kind || '' : '', source_day: s.src ? s.src.prev.start.slice(0, 10) : null,
     target_kind: s.src ? s.src.nxt.kind || '' : '',
     custom_minutes: !!(S().states[s.sid] && S().states[s.sid].minutes),     // durée fixée à la main
+    extra: !!s.extra, extra_id: s.extra ? S().extras.find(x => extraSid(x.id) === s.sid)?.id || 0 : 0,     // créneau ajouté à la main
   });
 
-  const metaOf = s => ({ catchup: s.catchup, subject: s.subject, target_day: s.targetStart.slice(0, 10), idx: s.idx });
+  const metaOf = s => ({ extra: !!s.extra, catchup: s.catchup, subject: s.subject, target_day: s.targetStart.slice(0, 10), idx: s.idx });
 
   // ------------------------------------------------------------ état des créneaux
   function ensureState(sid, meta) {
@@ -130,7 +156,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
   function setStatus(sid, meta, status) {
     const st = ensureState(sid, meta);
     const old = st.debt_delta || 0;
-    const delta = status === 'missed' && !meta.catchup ? 1 : status === 'done' && meta.catchup ? -1 : 0;
+    const delta = meta.extra ? 0 : status === 'missed' && !meta.catchup ? 1 : status === 'done' && meta.catchup ? -1 : 0;
     st.status = status; st.debt_delta = delta;
     const key = findSubject(meta.subject);
     if (key && delta !== old) S().subjects[key].backlog = Math.max(0, S().subjects[key].backlog + delta - old);
@@ -341,6 +367,28 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
                    days_left: Math.round((dayToMs(day) - dayToMs(t)) / DAY), sessions_total: mine.length, sessions_done: mine.filter(s => s.done).length,
                    minutes_left: mine.filter(s => !s.done).reduce((n, s) => n + s.minutes, 0) };
         });
+    }
+    if (method === 'GET' && p === '/api/free-slots') {          // heures libres pour un créneau de révision au choix
+      const day = q.get('day') || '', minutes = Number(q.get('minutes') || 60);
+      if (!isDay(day)) throw err(400, 'Date invalide.');
+      if (!Number.isInteger(minutes) || minutes < 5 || minutes > 480) throw err(400, 'La durée doit être comprise entre 5 minutes et 8 h.');
+      return { day, minutes, starts: freeStarts(day, minutes) };
+    }
+    if (method === 'POST' && p === '/api/extras') {
+      const key = findSubject(body.subject), minutes = Number(body.minutes);
+      if (!key) throw err(404, 'Matière introuvable.');
+      if (!isDay(body.day)) throw err(400, 'Date invalide.');
+      if (!HHMM.test(String(body.start || ''))) throw err(400, 'Heure invalide.');
+      if (!Number.isInteger(minutes) || minutes < 5 || minutes > 480) throw err(400, 'La durée doit être comprise entre 5 minutes et 8 h.');
+      if (!freeStarts(body.day, minutes).includes(body.start)) throw err(409, 'Ce créneau n\'est plus libre : choisis une autre heure.');
+      if (S().extras.length >= 1000) throw err(400, 'Trop de créneaux ajoutés à la main (1000 maximum).');
+      const x = { id: S().next_item_id++, subject: S().subjects[key].name, day: body.day, start: body.start, minutes };
+      S().extras.push(x); store.save();
+      return { ok: true, id: x.id };
+    }
+    if (method === 'DELETE' && (m = p.match(/^\/api\/extras\/(\d+)$/))) {
+      S().extras = S().extras.filter(x => x.id !== Number(m[1])); store.save();
+      return { ok: true };
     }
     if (method === 'GET' && p === '/api/blocks') {
       return [...S().blocks].sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start));

@@ -35,6 +35,11 @@ export const activeConfig = s => ({
 });
 
 /* ------------------------------------------------------------ prompts */
+/** Mode « IA sans lecture du cours » : aucun texte du document, seulement la question de l'étudiant. */
+export function generalPrompt() {
+  return `Tu es un assistant d'étude pour un étudiant. Aucun document de cours ne t'est fourni : réponds en français, de façon claire et pédagogique, à ses questions générales. Si une question demande le contenu précis de son cours, dis-lui que tu n'y as pas accès et propose de réactiver la lecture du cours.`;
+}
+
 /** Le texte du cours est une DONNÉE : on le délimite et on interdit de suivre les consignes qu'il contiendrait. */
 export function systemPrompt({ subject, title, text }) {
   const body = text.length > MAX_CONTEXT_CHARS

@@ -9,7 +9,7 @@ export const emptyState = () => ({
   version: VERSION,
   settings: { ics_url: '', last_sync: '', last_sync_count: '', last_error: '' },
   courses: [], subjects: {}, states: {}, blocks: [], next_block_id: 1,
-  recurring_blocks: [], custom_courses: [], next_item_id: 1, confidence: {}, restart_day: '',   // blocages hebdomadaires, cours ajoutés à la main
+  recurring_blocks: [], custom_courses: [], extras: [], next_item_id: 1, confidence: {}, restart_day: '',   // blocages hebdomadaires, cours ajoutés à la main
 });
 
 const HEX = /^#[0-9a-fA-F]{6}$/, DAYRE = /^\d{4}-\d{2}-\d{2}$/, HM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -61,6 +61,9 @@ export function normalize(raw) {
     .filter(b => b && weekdays(b.weekdays).length && HM.test(b.start) && HM.test(b.end) && b.end > b.start)
     .map(b => ({ id: Math.round(num(b.id, 1, 1e9, 1)), weekdays: weekdays(b.weekdays), start: b.start, end: b.end,
                  label: str(b.label, 80), from: optDay(b.from), until: optDay(b.until) }));
+  s.extras = (Array.isArray(raw.extras) ? raw.extras : []).slice(0, 1000)
+    .filter(x => x && DAYRE.test(x.day) && HM.test(x.start) && str(x.subject, 120))
+    .map(x => ({ id: Math.round(num(x.id, 1, 1e9, 1)), subject: str(x.subject, 120), day: x.day, start: x.start, minutes: Math.round(num(x.minutes, 5, 480, 60)) }));
   s.custom_courses = (Array.isArray(raw.custom_courses) ? raw.custom_courses : []).slice(0, 2000)
     .filter(c => c && HM.test(c.start) && HM.test(c.end) && c.end > c.start && DAYRE.test(c.from) &&
                  (c.frequency === 'once' || (c.frequency === 'weekly' && weekdays(c.weekdays).length)))
@@ -71,7 +74,7 @@ export function normalize(raw) {
   s.confidence = cleanConfidence(raw.confidence);
   s.restart_day = DAYRE.test(raw.restart_day) ? raw.restart_day : '';
   s.next_item_id = Math.max(Math.round(num(raw.next_item_id, 1, 1e9, 1)),
-    ...s.recurring_blocks.map(b => b.id + 1), ...s.custom_courses.map(c => c.id + 1), 1);
+    ...s.recurring_blocks.map(b => b.id + 1), ...s.custom_courses.map(c => c.id + 1), ...s.extras.map(x => x.id + 1), 1);
   return s;
 }
 

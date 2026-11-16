@@ -68,7 +68,7 @@ function merge(intervals) {
   return out;
 }
 
-function freeGaps(busy, winStart, winEnd) {
+export function freeGaps(busy, winStart, winEnd) {
   let cursor = winStart;
   const gaps = [];
   for (const [s, e] of merge(busy)) {
@@ -208,6 +208,14 @@ export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, to
     }
   }
 
+  // 1 bis) Créneaux de révision ajoutés à la main (cfg.extras) : heure fixe choisie par l'utilisateur (absents = comportement historique)
+  for (const x of cfg.extras || []) {
+    const custom = Number(states[x.sid] && states[x.sid].minutes), minutes = Number.isFinite(custom) && custom > 0 ? custom : x.minutes;
+    const startMs = dayToMs(x.day) + hmToMin(x.start) * MIN;
+    wanted.push({ sid: x.sid, subject: x.subject, targetMs: startMs, day: x.day, startMs, endMs: startMs + minutes * MIN, minutes, slotIndex: 0, slotCount: 1,
+                  status: 'pending', done: false, catchup: false, idx: 0, moved: false, overloaded: false, chapters: [], extra: true, fixed: true });
+  }
+
   // 2) Créneaux déplacés par l'utilisateur : prioritaires
   const final = [], auto = [];
   for (const s of wanted) {
@@ -220,6 +228,9 @@ export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, to
       s.endMs = s.startMs + s.minutes * MIN;
       s.moved = true;
       if (s.status !== 'missed') addBusy(s.day, s.startMs, s.endMs);   // un « Non fait » libère sa plage
+      final.push(s);
+    } else if (s.fixed) {
+      if (s.status !== 'missed') addBusy(s.day, s.startMs, s.endMs);
       final.push(s);
     } else auto.push(s);
   }
@@ -248,6 +259,7 @@ export function plan(rawCourses, subjects, states, blocks, cfg = DEFAULT_CFG, to
     start: msToDt(s.startMs), end: msToDt(s.endMs), minutes: s.minutes,
     slotIndex: s.slotIndex, slotCount: s.slotCount, done: s.done, status: s.status,
     catchup: s.catchup, idx: s.idx, moved: s.moved, overloaded: s.overloaded, chapters: s.chapters,
+    ...(s.extra ? { extra: true } : {}),
   }));
 }
 

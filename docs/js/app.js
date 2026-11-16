@@ -71,6 +71,7 @@ async function openSessionDoc(s, from) {
 const workPill = s => { const w = WORK[s.work] || WORK.review; return `<span class="work-pill ${esc(s.work || 'review')}" title="${esc(w.action)}">${w.icon} ${w.label}</span>`; };
 /** « Apprendre le cours du lun. 2 · chap. 1–2 · avant le TD du mar. 10 » / « Refaire les exercices du lun. 2 · série 1 · avant le cours… » */
 function sessionWhat(s) {
+  if (s.extra) return 'Révision ajoutée par toi';
   const w = WORK[s.work] || WORK.review, rng = unitRange(s.work, s.chapters);
   const from = s.source_day ? ` du ${fmtShort(s.source_day)}` : '';
   const to = s.target ? ` · ${s.work === 'exam' ? 'pour' : 'avant'} ${s.work === 'exam' ? examNoun(s.target_kind) : 'le ' + kindNoun(s.target_kind)} du ${fmtShort(s.target.slice(0, 10))}` : '';
@@ -112,6 +113,7 @@ function sessionRow(s, withDay = false, draggable = false) {
     ${s.status === 'pending' ? `<button data-timer="${esc(s.id)}" class="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-100 shrink-0" title="Lancer un minuteur de ${s.minutes} min">▶ Commencer</button>` : ''}
     <button data-open-doc="${esc(s.id)}" class="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-100 shrink-0" title="Ouvrir le ${s.work === 'practice' ? 'TD' : 'cours'} à travailler">📂 Ouvrir</button>
     ${s.status === 'pending' ? `<button data-move="${esc(s.id)}" class="text-xs text-slate-500 hover:text-slate-900 underline shrink-0">Modifier</button>` : ''}
+    ${s.extra ? `<button data-extra-del="${s.extra_id}" class="text-xs shrink-0" title="Supprimer ce créneau" aria-label="Supprimer ce créneau">🗑</button>` : ''}
   </li>`;
 }
 
@@ -126,6 +128,7 @@ function bindSessionActions(root) {
     if (wasDone) askConfidence(wasDone.subject, wasDone.work);
   }));
   $$('[data-move]', root).forEach(b => b.onclick = () => openMove(sessionIndex[b.dataset.move]));
+  $$('[data-extra-del]', root).forEach(b => b.onclick = guard(async () => { await api(`/api/extras/${b.dataset.extraDel}`, { method: 'DELETE' }); toast('Créneau supprimé'); await refresh(); }));
   $$('[data-subj]', root).forEach(b => b.onclick = e => { e.stopPropagation(); openSubject(b.dataset.subj, view); });
   $$('[data-timer]', root).forEach(b => b.onclick = () => startTimer(sessionIndex[b.dataset.timer]));
   $$('[data-open-doc]', root).forEach(b => b.onclick = guard(async () => { reviewIntent = null; await openSessionDoc(sessionIndex[b.dataset.openDoc], view); }));
@@ -1519,6 +1522,35 @@ const loaders = { guide: loadGuide, dashboard: loadDashboard, calendar: loadCale
 function loadGuide() { window.scrollTo(0, 0); }
 $$('[data-scroll]').forEach(b => b.onclick = () => document.getElementById(b.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « enfants » : on garde « Matières » allumé
+/* ---------------------------------------------------------------- créneau de révision au choix */
+let extraStart = '';
+async function loadExtraStarts() {
+  const f = $('#extra-form'), box = $('#extra-starts'); extraStart = ''; $('#extra-save').disabled = true;
+  if (!f.day.value) { box.innerHTML = ''; return; }
+  const r = await api(`/api/free-slots?day=${f.day.value}&minutes=${f.minutes.value}`);
+  box.innerHTML = r.starts.length ? r.starts.map(t => `<button type="button" class="tool" role="radio" aria-checked="false" data-start="${t}">${t}</button>`).join('')
+    : '<p class="text-sm text-slate-500">Aucune plage libre assez longue ce jour-là : essaie un autre jour ou une durée plus courte.</p>';
+  $$('[data-start]', box).forEach(b => b.onclick = () => {
+    extraStart = b.dataset.start; $('#extra-save').disabled = false;
+    $$('[data-start]', box).forEach(x => { const on = x === b; x.setAttribute('aria-checked', String(on)); x.classList.toggle('tool-primary', on); });
+  });
+}
+$('#extra-open').onclick = guard(async () => {
+  const f = $('#extra-form'), subs = await api('/api/subjects');
+  if (!subs.length) return toast('Ajoute d\'abord ton emploi du temps : il n\'y a encore aucune matière.', false);
+  f.subject.innerHTML = subs.map(x => `<option>${esc(x.name)}</option>`).join('');
+  f.day.min = todayIso(); if (!f.day.value || f.day.value < f.day.min) f.day.value = todayIso();
+  await loadExtraStarts(); $('#extra-dialog').showModal();
+});
+$('#extra-form').day.onchange = $('#extra-form').minutes.onchange = guard(loadExtraStarts);
+$('#extra-form').onsubmit = guard(async e => {
+  e.preventDefault(); const f = e.target;
+  if (!extraStart) return;
+  try { await api('/api/extras', { method: 'POST', json: { subject: f.subject.value, day: f.day.value, start: extraStart, minutes: Number(f.minutes.value) } }); }
+  catch (err) { await loadExtraStarts(); throw err; }
+  $('#extra-dialog').close(); toast(`Créneau ajouté : ${f.subject.value}, ${fmtShort(f.day.value)} à ${extraStart}`); await refresh();
+});
+
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
 /* ---------------------------------------------------------------- fiches mémoire */
 $$('[data-close]').forEach(b => b.onclick = () => $(`#${b.dataset.close}`).close());

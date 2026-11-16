@@ -337,7 +337,7 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
         .map(c => {
           const mine = sessions.filter(s => s.src && s.src.nxt.start === c.start && fold(s.subject) === fold(c.subject) && s.status !== 'missed');
           const day = c.start.slice(0, 10), key = findSubject(c.subject);
-          return { subject: c.subject, color: (subjects[key] || {}).color || '#64748b', kind: c.kind, day, start: c.start, end: c.end, room: c.room || '',
+          return { subject: c.subject, cid: c.custom ? c.cid : 0, color: (subjects[key] || {}).color || '#64748b', kind: c.kind, day, start: c.start, end: c.end, room: c.room || '',
                    days_left: Math.round((dayToMs(day) - dayToMs(t)) / DAY), sessions_total: mine.length, sessions_done: mine.filter(s => s.done).length,
                    minutes_left: mine.filter(s => !s.done).reduce((n, s) => n + s.minutes, 0) };
         });

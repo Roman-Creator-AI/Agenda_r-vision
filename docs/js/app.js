@@ -257,18 +257,45 @@ function renderTasks() {
 /** Carte « Examens à venir » : compte à rebours et avancement des révisions. */
 async function renderExams() {
   const card = $('#exam-card'), list = await api('/api/exams');
-  card.classList.toggle('hidden', !list.length);
+  $('#exam-empty').classList.toggle('hidden', !!list.length);
+  $('#exam-subjects').innerHTML = (await api('/api/subjects')).map(x => `<option value="${esc(x.name)}">`).join('');
   $('#exam-list').innerHTML = list.slice(0, 5).map(x => {
     const pct = x.sessions_total ? Math.round(100 * x.sessions_done / x.sessions_total) : 0;
     const left = x.days_left === 0 ? 'aujourd\'hui' : x.days_left === 1 ? 'demain' : `dans ${x.days_left} j`;
     return `<li class="exam-item" style="border-left-color:${esc(x.color)}"><span class="exam-count ${x.days_left <= 7 ? 'soon' : ''}">${left}</span>
       <div class="min-w-0 flex-1"><button type="button" class="subj-link font-medium" data-subj="${esc(x.subject)}">${esc(x.subject)}</button>
         <span class="text-xs text-slate-500"> · ${esc(x.kind || 'Examen')} ${fmtShort(x.day)} ${hhmm(x.start)}</span>
+        ${x.cid ? `<button type="button" class="text-xs" data-exam-edit="${x.cid}" title="Modifier" aria-label="Modifier">✏️</button> <button type="button" class="text-xs" data-exam-del="${x.cid}" title="Supprimer" aria-label="Supprimer">🗑</button>` : ''}
         <div class="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden"><div class="h-full bg-red-400" style="width:${pct}%"></div></div>
         <p class="text-xs text-slate-500 mt-0.5">${x.sessions_total ? `${x.sessions_done}/${x.sessions_total} créneaux faits · reste ${fmtDur(x.minutes_left)}` : 'aucun créneau prévu'}</p></div></li>`;
   }).join('');
   bindSessionActions(card);
+  $$('#exam-list [data-exam-del]').forEach(b => b.onclick = guard(async () => {
+    await api(`/api/custom-courses/${b.dataset.examDel}`, { method: 'DELETE' }); toast('Interro supprimée'); await refreshAfterExam();
+  }));
+  $$('#exam-list [data-exam-edit]').forEach(b => b.onclick = () => {
+    const x = list.find(e => String(e.cid) === b.dataset.examEdit), f = $('#exam-form');
+    f.subject.value = x.subject; f.kind.value = [...f.kind.options].some(o => o.value === x.kind) ? x.kind : 'Interro';
+    f.from.value = x.day; f.start.value = hhmm(x.start);
+    const mins = (Number(x.end.slice(11, 13)) * 60 + Number(x.end.slice(14, 16))) - (Number(x.start.slice(11, 13)) * 60 + Number(x.start.slice(14, 16)));
+    f.duration.value = [...f.duration.options].some(o => Number(o.value) === mins) ? String(mins) : '120';
+    examEditing = x.cid; $('#exam-save').textContent = 'Enregistrer'; $('#exam-cancel').classList.remove('hidden');
+    $('#exam-add').open = true; f.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
 }
+let examEditing = 0;
+const refreshAfterExam = () => loadDashboard();
+const resetExamForm = () => { examEditing = 0; $('#exam-form').reset(); $('#exam-save').textContent = 'Programmer'; $('#exam-cancel').classList.add('hidden'); };
+$('#exam-cancel').onclick = resetExamForm;
+$('#exam-form').onsubmit = guard(async e => {
+  e.preventDefault();
+  const f = e.target, [h, m] = f.start.value.split(':').map(Number), endMin = Math.min(h * 60 + m + Number(f.duration.value), 23 * 60 + 59);
+  if (h * 60 + m >= endMin) throw new Error('Choisis une heure plus tôt dans la journée.');
+  const end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+  await api('/api/custom-courses', { method: 'POST', json: { subject: f.subject.value, kind: f.kind.value, from: f.from.value, start: f.start.value, end, frequency: 'once' } });
+  if (examEditing) await api(`/api/custom-courses/${examEditing}`, { method: 'DELETE' });
+  toast(examEditing ? 'Interro modifiée' : 'Interro programmée'); resetExamForm(); await refreshAfterExam();
+});
 
 /** Carte « À réviser en priorité » : retards d'abord, puis prochain cours le plus proche. */
 async function renderPriorities() {

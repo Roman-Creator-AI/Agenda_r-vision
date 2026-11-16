@@ -142,17 +142,42 @@ function httpError(provider, status, json) {
   return new AiError(`Erreur du service d'IA (${status})${detail ? ' : ' + detail : ''}.`);
 }
 
-/** Envoie la conversation et renvoie le texte de la réponse. */
-export async function ask(config, { system, messages }, fetchFn = globalThis.fetch.bind(globalThis)) {
-  if (!config.key) throw new AiError('Ajoute d\'abord ta clé API dans les réglages de l\'assistant.', 'nokey');
+/** Modèles Gemini plus légers, essayés dans l'ordre si le modèle choisi est saturé. */
+export const GEMINI_FALLBACKS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const BUSY = new Set([429, 500, 502, 503, 504]);
+const RETRY_DELAYS = [2000, 5000];
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+async function askOnce(config, { system, messages }, fetchFn) {
   const { url, init } = buildRequest(config.provider, { ...config, system, messages });
   let res;
   try { res = await fetchFn(url, init); }
   catch { throw new AiError('Connexion impossible au service d\'IA (hors ligne ou bloquée).', 'network'); }
   let json = null;
   try { json = await res.json(); } catch { /* corps non JSON */ }
-  if (!res.ok) throw httpError(config.provider, res.status, json);
+  if (!res.ok) { const e = httpError(config.provider, res.status, json); e.status = res.status; throw e; }
   return parseResponse(config.provider, json);
+}
+
+/** Envoie la conversation et renvoie le texte de la réponse.
+ *  Service saturé (429/5xx) : on réessaie 2 fois, puis (Gemini) on bascule sur un modèle plus léger. */
+export async function ask(config, { system, messages }, fetchFn = globalThis.fetch.bind(globalThis), sleep = wait) {
+  if (!config.key) throw new AiError('Ajoute d\'abord ta clé API dans les réglages de l\'assistant.', 'nokey');
+  const models = [config.model, ...(config.provider === 'gemini' ? GEMINI_FALLBACKS.filter(m => m !== config.model) : [])];
+  let last;
+  for (const model of models) {
+    for (let i = 0; i <= RETRY_DELAYS.length; i++) {
+      try { return await askOnce({ ...config, model }, { system, messages }, fetchFn); }
+      catch (e) {
+        last = e;
+        if (e.code === 'model' && model !== config.model) break;      // modèle de secours inconnu : on passe au suivant
+        if (!BUSY.has(e.status)) throw e;
+        if (i < RETRY_DELAYS.length) await sleep(RETRY_DELAYS[i]);
+      }
+    }
+  }
+  if (last && last.code === 'model') throw last;
+  throw new AiError('Le service d\'IA est saturé en ce moment (plusieurs essais et modèles de secours tentés). Réessaie dans quelques minutes ou change de modèle dans les réglages.', 'quota');
 }
 
 /* ------------------------------------------------------------ TD : des exercices à travailler (et non un cours à apprendre) */

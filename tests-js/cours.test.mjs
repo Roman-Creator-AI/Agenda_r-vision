@@ -133,3 +133,18 @@ test('pptx : ordre réel des diapositives (presentation.xml) et notes via les re
   assert.equal(await pptxText(zip), '[Diapo 1]\nDeuxième fichier\nNotes : Note de la première diapo\n\n[Diapo 2]\nPremier fichier');
   await assert.rejects(pptxText(fakeZip({})), /illisible/);
 });
+
+import * as AIx from '../docs/js/ai.js';
+test('IA saturée : réessaie puis bascule sur un modèle de secours', async () => {
+  const urls = []; let n = 0;
+  const f = async (url) => { urls.push(url); n++; const ok = n >= 4;
+    return { ok, status: ok ? 200 : 503, json: async () => ok ? { candidates: [{ content: { parts: [{ text: 'ok' }] } }] } : { error: { message: 'overloaded' } } }; };
+  const r = await AIx.ask({ provider: 'gemini', key: 'k', model: 'gemini-x' }, { system: 's', messages: [{ role: 'user', content: 'q' }] }, f, async () => {});
+  assert.equal(r, 'ok'); assert.equal(n, 4);
+  assert.ok(/gemini-x/.test(urls[0]) && /gemini-2\.5-flash/.test(urls[3]));
+});
+test('IA : une clé refusée n\'est pas réessayée', async () => {
+  let n = 0; const f = async () => { n++; return { ok: false, status: 403, json: async () => ({}) }; };
+  await assert.rejects(AIx.ask({ provider: 'gemini', key: 'k', model: 'm' }, { system: 's', messages: [] }, f, async () => {}), /Clé API/);
+  assert.equal(n, 1);
+});

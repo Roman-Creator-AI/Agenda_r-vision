@@ -558,6 +558,9 @@ html.dark .guide-two > div { border-color: #232e3d; background: #15212c; }
 html.dark .guide-note { background: #051442; border-color: #0a1b62; }
 html.dark .guide-sec details { border-top-color: #212630; }
 html.dark .guide-sec details p { color: #a1adbf; }
+html.dark .ai-toggle { border-color: #324050; background: #191b1f; }
+html.dark .ai-toggle:hover { background: #182532; }
+html.dark .ai-toggle.off { background: #62500a; border-color: #e7a536; color: #f2a97c; }
 /* <<< fin du thème sombre généré */
 
 /* === retouches du thème sombre (écrites à la main, après le bloc généré) === */
@@ -617,3 +620,7 @@ html.dark .bg-slate-900 { background-color: #4f46e5; } html.dark .hover\:bg-slat
 .guide-sec details summary { cursor: pointer; font-weight: 600; }
 .guide-sec details p { margin-top: .4rem; color: #475569; }
 html.dark .guide-toc { background: #12161d; }
+.ai-toggle { font-size: .75rem; border: 1px solid #cbd5e1; border-radius: 999px; padding: .2rem .65rem; background: #fff; white-space: nowrap; }
+.ai-toggle:hover { background: #f1f5f9; }
+.ai-toggle.off { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+.ai-body button:disabled, .ai-form textarea:disabled { opacity: .5; cursor: not-allowed; }

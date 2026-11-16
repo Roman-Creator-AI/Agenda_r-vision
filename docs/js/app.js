@@ -996,10 +996,33 @@ const aiConfig = () => AI.activeConfig(aiSettings);
 function updateAiStatus(busyText = '') {
   const el = $('#ai-status'), c = aiConfig();
   el.className = 'ai-status' + (busyText ? ' busy' : c.key ? ' ready' : '');
-  el.textContent = busyText || (c.key ? c.model : 'Clé API à ajouter');
+  el.textContent = busyText || (doc && doc.ai_off ? 'IA désactivée' : c.key ? c.model : 'Clé API à ajouter');
 }
 const T = () => AI.forTopic(doc && doc.topic);
-const aiContext = () => T().system({ subject: doc.subject_name, title: doc.name, text: doc.text });
+/** Le texte du cours n'est envoyé à l'IA que si elle est autorisée à le lire : toutes les fonctions d'IA passent par ici. */
+const aiAllowed = () => !(doc && doc.ai_off);
+const aiContext = () => {
+  if (!aiAllowed()) throw new AI.AiError('L\'IA ne lit pas ce cours : rien n\'est envoyé. Réactive-la avec le bouton « IA » de l\'assistant.', 'off');
+  return T().system({ subject: doc.subject_name, title: doc.name, text: doc.text });
+};
+/** Interrupteur « L'IA lit ce cours » : état du bouton, saisie et raccourcis de l'assistant. */
+function applyAiMode() {
+  const on = aiAllowed(), b = $('#ai-toggle');
+  b.classList.toggle('off', !on); b.setAttribute('aria-pressed', String(on));
+  b.innerHTML = on ? '🤖 IA : lit ce cours' : '🔒 IA : ne lit pas';
+  b.title = on ? 'Clique pour empêcher l\'IA de lire ce cours (aucun texte ne sera envoyé)' : 'Clique pour autoriser l\'IA à lire ce cours';
+  $('#ai-input').disabled = !on; $('#ai-send').disabled = !on || aiBusy;
+  $('#ai-input').placeholder = on ? 'Pose ta question…' : 'IA désactivée pour ce cours';
+  $$('#ai-suggest button, #ai-quick button').forEach(x => { x.disabled = !on; });
+  $('#review-quiz').disabled = !on || !aiConfig().key;
+  updateAiStatus();
+}
+$('#ai-toggle').onclick = guard(async () => {
+  if (!doc) return;
+  doc.ai_off = !doc.ai_off; await library.update(doc.id, { ai_off: doc.ai_off });
+  applyAiMode(); toast(doc.ai_off ? 'L\'IA ne lit plus ce cours : rien ne lui est envoyé' : 'L\'IA peut lire ce cours');
+  if (doc.ai_off) { if (!doc.summary) renderSummary('off'); } else if (!doc.summary && !aiBusy) summarize(); else renderSummary(doc.summary ? 'ready' : 'nokey');
+});
 /** Textes qui changent selon que le document est un cours (à apprendre) ou un TD (exercices). */
 function applyTopicTexts() {
   const t = T();
@@ -1011,19 +1034,23 @@ function applyTopicTexts() {
 
 function renderSummary(state, msg = '') {
   const el = $('#ai-summary'), btn = $('#ai-resum');
-  btn.classList.toggle('hidden', !(doc && doc.summary) || aiBusy);
+  btn.classList.toggle('hidden', !(doc && doc.summary) || aiBusy || !aiAllowed());
   if (state !== 'ready') el.closest('details').open = true;
   if (state === 'ready') el.innerHTML = mdToHtml(doc.summary);
   else if (state === 'loading') el.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="sr-only">Lecture du cours en cours</span>';
+  else if (state === 'off') el.innerHTML = `<p class="text-slate-600">🔒 L'IA ne lit pas ce cours : aucun texte n'est envoyé. Tu peux toujours lire le document, créer tes fiches à la main et utiliser le rappel libre.</p>
+      <button type="button" data-allow class="tool mt-3">Autoriser l'IA à le lire</button>`;
   else if (state === 'nokey') el.innerHTML = `<p class="text-slate-600">${esc(T().noKey)}</p>
       <button type="button" data-config class="tool tool-primary mt-3">Ajouter ma clé</button>`;
   else el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><button type="button" data-retry class="tool mt-3">Réessayer</button>`;
   $('[data-config]', el)?.addEventListener('click', openAiSettings);
+  $('[data-allow]', el)?.addEventListener('click', () => $('#ai-toggle').click());
   $('[data-retry]', el)?.addEventListener('click', () => summarize());
 }
 
 async function summarize() {
   const cfg = aiConfig(), token = docToken;
+  if (!aiAllowed()) return renderSummary('off');
   if (!cfg.key) return renderSummary('nokey');
   aiBusy = true; renderSummary('loading'); updateAiStatus('Lit le cours…');
   try {
@@ -1042,7 +1069,7 @@ $('#ai-resum').onclick = () => { if (!aiBusy) summarize(); };
 
 async function sendQuestion(text) {
   text = String(text || '').trim();
-  if (!text || aiBusy || !doc) return;
+  if (!text || aiBusy || !doc || !aiAllowed()) return;
   const cfg = aiConfig(), token = docToken;
   if (!cfg.key) return openAiSettings();
   aiBusy = true; $('#ai-send').disabled = true; updateAiStatus('Réfléchit…');
@@ -1062,7 +1089,7 @@ async function sendQuestion(text) {
     renderChat(); $('#ai-input').value = text; autosize(); errBubble(e.message);
     if (e.code === 'auth' || e.code === 'nokey') openAiSettings();
   } finally {
-    if (token === docToken) { aiBusy = false; $('#ai-send').disabled = false; typing(false); updateAiStatus(); renderSummary(doc.summary ? 'ready' : 'nokey'); scrollChat(); }
+    if (token === docToken) { aiBusy = false; $('#ai-send').disabled = false; typing(false); updateAiStatus(); renderSummary(doc.summary ? 'ready' : aiAllowed() ? 'nokey' : 'off'); scrollChat(); }
   }
 }
 const autosize = () => { const t = $('#ai-input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; };
@@ -1158,8 +1185,8 @@ async function loadDoc(id) {
   renderMeta(d);
   $('#doc-back-label').textContent = d.subject_name;
   $('#doc-original').classList.toggle('hidden', !d.blob);
-  updateAiStatus(); applySize(); applyTopicTexts();
-  renderReader(d.text); renderChat();
+  applySize(); applyTopicTexts();
+  renderReader(d.text); renderChat(); applyAiMode();
   window.scrollTo({ top: 0 }); $('#doc-article').scrollTop = 0; updateProgress();
   setupPdf(d, docToken);
   renderSrs();
@@ -1293,7 +1320,7 @@ async function applyGrade(grade) {
 }
 function showReviewBar() {
   $('#review-bar').classList.remove('hidden'); $('#review-choice').classList.remove('hidden'); $('#review-grade').classList.add('hidden');
-  $('#review-quiz').disabled = !aiConfig().key; $('#review-quiz').title = aiConfig().key ? '' : 'Ajoute d\'abord ta clé API dans les réglages de l\'assistant';
+  $('#review-quiz').disabled = !aiConfig().key || !aiAllowed(); $('#review-quiz').title = aiConfig().key ? '' : 'Ajoute d\'abord ta clé API dans les réglages de l\'assistant';
 }
 function hideReviewBar() { $('#review-bar').classList.add('hidden'); }
 function startReread() {
@@ -1311,6 +1338,7 @@ $('#review-grade-btns').onclick = guard(async e => { const b = e.target.closest(
 let quiz = null, quizSession = 0;
 async function startQuiz() {
   if (!doc || !doc.srs) return;
+  if (!aiAllowed()) return toast('L\'IA est désactivée pour ce cours.', false);
   if (!aiConfig().key) return openAiSettings();
   const session = ++quizSession;
   quiz = null; $('#quiz-title').textContent = `${T().quizTitle} · ${doc.name}`;
@@ -1445,7 +1473,7 @@ const NAV_OF = { subject: 'subjects', doc: 'subjects' };           // pages « e
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });
 /* ---------------------------------------------------------------- fiches mémoire */
 $$('[data-close]').forEach(b => b.onclick = () => $(`#${b.dataset.close}`).close());
-const aiReady = () => !!aiConfig().key;
+const aiReady = () => !!aiConfig().key && aiAllowed();
 const saveCards = async cards => { doc.cards = cards; await library.update(doc.id, { cards }); };
 
 async function openDeck() {

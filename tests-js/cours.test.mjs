@@ -148,3 +148,13 @@ test('IA : une clé refusée n\'est pas réessayée', async () => {
   await assert.rejects(AIx.ask({ provider: 'gemini', key: 'k', model: 'm' }, { system: 's', messages: [] }, f, async () => {}), /Clé API/);
   assert.equal(n, 1);
 });
+
+test('mode extraits : ne garde que les passages liés à la question', () => {
+  const cours = ['[Page 1]\nLa mitose est la division cellulaire qui produit deux cellules identiques.', '[Page 2]\nLa révolution française commence en 1789 avec la prise de la Bastille.', '[Page 3]\nLe théorème de Pythagore relie les côtés d\'un triangle rectangle.'].join('\n');
+  const ex = AIx.selectExcerpts(cours, 'Explique la révolution de 1789 ?');
+  assert.equal(ex.length, 1); assert.ok(/Bastille/.test(ex[0]) && !/mitose|Pythagore/.test(ex[0]));
+  assert.deepEqual(AIx.selectExcerpts(cours, 'quoi comment ?'), []);
+  const long = Array.from({ length: 40 }, (_, i) => `Paragraphe ${i} ${'mot '.repeat(60)} énergie`).join('\n\n');
+  const sel = AIx.selectExcerpts(long, 'énergie', { maxChars: 3000 });
+  assert.ok(sel.join('').length <= 3200 && sel.length >= 1);
+});

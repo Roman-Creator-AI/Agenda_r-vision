@@ -996,21 +996,27 @@ const aiConfig = () => AI.activeConfig(aiSettings);
 function updateAiStatus(busyText = '') {
   const el = $('#ai-status'), c = aiConfig();
   el.className = 'ai-status' + (busyText ? ' busy' : c.key ? ' ready' : '');
-  el.textContent = busyText || (doc && doc.ai_off ? 'Sans lecture du cours' : c.key ? c.model : 'Clé API à ajouter');
+  el.textContent = busyText || (doc && doc.ai_off ? 'Sans lecture du cours' : doc && doc.ai_extracts ? 'Extraits · ' + c.model : c.key ? c.model : 'Clé API à ajouter');
 }
 const T = () => AI.forTopic(doc && doc.topic);
 /** Le texte du cours n'est envoyé à l'IA que si elle est autorisée à le lire : toutes les fonctions d'IA passent par ici. */
 const aiAllowed = () => !(doc && doc.ai_off);
+/** 'full' : tout le cours · 'extracts' : seulement les passages liés à la question · 'off' : rien */
+const aiMode = () => doc && doc.ai_off ? 'off' : doc && doc.ai_extracts ? 'extracts' : 'full';
 const aiContext = () => {
   if (!aiAllowed()) throw new AI.AiError('L\'IA ne lit pas ce cours : rien n\'est envoyé. Réactive-la avec le bouton « IA » de l\'assistant.', 'off');
   return T().system({ subject: doc.subject_name, title: doc.name, text: doc.text });
 };
+const extractsContext = q => {
+  const prev = [...doc.chat].reverse().find(m => m.role === 'user' && m.content !== q);
+  return AI.systemPromptExcerpts({ subject: doc.subject_name, title: doc.name, excerpts: AI.selectExcerpts(doc.text, q + ' ' + (prev ? prev.content : '')) });
+};
 /** Interrupteur « L'IA lit ce cours » : état du bouton, saisie et raccourcis de l'assistant. */
 function applyAiMode() {
-  const on = aiAllowed(), b = $('#ai-toggle');
+  const on = aiAllowed(), m = aiMode(), b = $('#ai-toggle');
   b.classList.toggle('off', !on); b.setAttribute('aria-pressed', String(on));
-  b.innerHTML = on ? '🤖 IA : lit ce cours' : '🔒 IA : ne lit pas';
-  b.title = on ? 'Clique pour empêcher l\'IA de lire ce cours (aucun texte ne sera envoyé)' : 'Clique pour autoriser l\'IA à lire ce cours';
+  b.innerHTML = m === 'full' ? '🤖 IA : lit tout le cours' : m === 'extracts' ? '✂️ IA : extraits seulement' : '🔒 IA : ne lit pas';
+  b.title = m === 'full' ? 'Clique pour n\'envoyer à l\'IA que les extraits liés à tes questions' : m === 'extracts' ? 'Clique pour empêcher l\'IA de lire ce cours (aucun texte ne sera envoyé)' : 'Clique pour autoriser l\'IA à lire tout le cours';
   $('#ai-input').disabled = false; $('#ai-send').disabled = aiBusy;
   $('#ai-input').placeholder = on ? 'Pose ta question…' : 'Question générale (l\'IA ne voit pas ton cours)…';
   $$('#ai-suggest button, #ai-quick button').forEach(x => { x.disabled = !on; });
@@ -1019,9 +1025,12 @@ function applyAiMode() {
 }
 $('#ai-toggle').onclick = guard(async () => {
   if (!doc) return;
-  doc.ai_off = !doc.ai_off; await library.update(doc.id, { ai_off: doc.ai_off });
-  applyAiMode(); toast(doc.ai_off ? 'L\'IA ne lit plus ce cours : rien ne lui est envoyé' : 'L\'IA peut lire ce cours');
-  if (doc.ai_off) { if (!doc.summary) renderSummary('off'); } else if (!doc.summary && !aiBusy) summarize(); else renderSummary(doc.summary ? 'ready' : 'nokey');
+  const next = { full: 'extracts', extracts: 'off', off: 'full' }[aiMode()];
+  doc.ai_off = next === 'off'; doc.ai_extracts = next === 'extracts';
+  await library.update(doc.id, { ai_off: doc.ai_off, ai_extracts: doc.ai_extracts });
+  applyAiMode();
+  toast({ full: 'L\'IA peut lire tout le cours', extracts: 'L\'IA ne reçoit que les extraits liés à tes questions', off: 'L\'IA ne lit plus ce cours : rien ne lui est envoyé' }[next]);
+  if (next === 'off') { if (!doc.summary) renderSummary('off'); } else autoSummarize();
 });
 /** Textes qui changent selon que le document est un cours (à apprendre) ou un TD (exercices). */
 function applyTopicTexts() {
@@ -1040,12 +1049,21 @@ function renderSummary(state, msg = '') {
   else if (state === 'loading') el.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><span class="sr-only">Lecture du cours en cours</span>';
   else if (state === 'off') el.innerHTML = `<p class="text-slate-600">🔒 L'IA ne lit pas ce cours : aucun texte n'est envoyé. Tu peux toujours lire le document, créer tes fiches à la main et utiliser le rappel libre.</p>
       <button type="button" data-allow class="tool mt-3">Autoriser l'IA à le lire</button>`;
+  else if (state === 'extracts') el.innerHTML = `<p class="text-slate-600">✂️ Mode extraits : pour chaque question, seuls les passages du cours qui s'y rapportent sont envoyés à l'IA (pas de résumé automatique).</p>
+      <button type="button" data-fullsum class="tool mt-3">Résumer tout le cours quand même</button>`;
   else if (state === 'nokey') el.innerHTML = `<p class="text-slate-600">${esc(T().noKey)}</p>
       <button type="button" data-config class="tool tool-primary mt-3">Ajouter ma clé</button>`;
   else el.innerHTML = `<p class="text-red-700" role="alert">${esc(msg)}</p><button type="button" data-retry class="tool mt-3">Réessayer</button>`;
   $('[data-config]', el)?.addEventListener('click', openAiSettings);
   $('[data-allow]', el)?.addEventListener('click', () => $('#ai-toggle').click());
   $('[data-retry]', el)?.addEventListener('click', () => summarize());
+  $('[data-fullsum]', el)?.addEventListener('click', () => summarize());
+}
+/** Résumé automatique à l'ouverture : sauf en mode extraits (qui évite d'envoyer tout le cours). */
+function autoSummarize() {
+  if (aiMode() === 'extracts') return renderSummary(doc.summary ? 'ready' : 'extracts');
+  if (doc.summary) return renderSummary('ready');
+  if (!aiBusy) summarize(); else renderSummary('nokey');
 }
 
 async function summarize() {
@@ -1080,7 +1098,7 @@ async function sendQuestion(text) {
     // IA coupée : on n'envoie ni le texte du cours ni les anciennes réponses qui le citent, seulement les échanges « généraux »
     const answer = await AI.ask(cfg, general
       ? { system: AI.generalPrompt(), messages: doc.chat.filter(m => m.g) }
-      : { system: aiContext(), messages: doc.chat });
+      : { system: aiMode() === 'extracts' ? extractsContext(text) : aiContext(), messages: doc.chat });
     if (token !== docToken) return;
     doc.chat.push({ role: 'assistant', content: answer, ...(general ? { g: 1 } : {}) });
     doc.chat = doc.chat.slice(-60);
@@ -1093,7 +1111,7 @@ async function sendQuestion(text) {
     renderChat(); $('#ai-input').value = text; autosize(); errBubble(e.message);
     if (e.code === 'auth' || e.code === 'nokey') openAiSettings();
   } finally {
-    if (token === docToken) { aiBusy = false; $('#ai-send').disabled = false; typing(false); updateAiStatus(); renderSummary(doc.summary ? 'ready' : aiAllowed() ? 'nokey' : 'off'); scrollChat(); }
+    if (token === docToken) { aiBusy = false; $('#ai-send').disabled = false; typing(false); updateAiStatus(); renderSummary(doc.summary ? 'ready' : aiMode() === 'extracts' ? 'extracts' : aiAllowed() ? 'nokey' : 'off'); scrollChat(); }
   }
 }
 const autosize = () => { const t = $('#ai-input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; };
@@ -1195,7 +1213,7 @@ async function loadDoc(id) {
   setupPdf(d, docToken);
   renderSrs();
   if (reviewIntent === String(d.id) && d.srs) showReviewBar(); else hideReviewBar();
-  if (d.summary) renderSummary('ready'); else summarize();
+  autoSummarize();
 }
 $('#doc-back').onclick = () => show('subject', doc ? doc.subject_name : '');
 $('#doc-original').onclick = () => {
@@ -1238,7 +1256,7 @@ $('#ai-config-form').onsubmit = () => {
   else toast('Assistant configuré');
   if (view === 'doc' && doc) {
     updateAiStatus();
-    if (!doc.summary && !aiBusy) summarize();
+    if (!doc.summary && !aiBusy) autoSummarize();
   }
 };
 

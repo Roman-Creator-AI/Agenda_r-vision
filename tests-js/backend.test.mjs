@@ -323,3 +323,14 @@ test('matière retirée des révisions : plus de créneaux, restaurés quand on 
   await rejects(call('PUT', '/api/subjects', { name: 'Inconnue', enabled: false }), 404);
 });
 const TODAY_WEEKDAY = () => (new Date(TODAY + 'T12:00:00').getDay() + 6) % 7;
+
+test('interro programmée à la main : apparaît dans les examens, modifiable et supprimable', async () => {
+  const { call } = await setup();
+  const day = addDays(TODAY, 9);
+  await call('POST', '/api/custom-courses', { subject: 'Chimie', kind: 'Interro', from: day, start: '09:30', end: '10:30', frequency: 'once' });
+  let ex = await call('GET', '/api/exams');
+  assert.equal(ex.length, 1);
+  assert.equal(ex[0].subject, 'Chimie'); assert.equal(ex[0].days_left, 9); assert.ok(ex[0].cid > 0);
+  await call('DELETE', `/api/custom-courses/${ex[0].cid}`);
+  assert.equal((await call('GET', '/api/exams')).length, 0);
+});

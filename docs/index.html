@@ -158,7 +158,8 @@
           <li><b>Retards</b> : un créneau non fait passe en retard ; « Tout replacer automatiquement » les répartit sur les jours les moins chargés.</li>
           <li><b>Réglages par matière</b> : durée d'une session, durée des séances de TD, nombre de chapitres, intensité. Une matière sur laquelle tu te sens fragile reçoit automatiquement un peu plus de temps.</li>
           <li><b>Créneaux bloqués</b> : indique tes indisponibilités (sport, job…) pour que rien ne soit placé dessus.</li>
-          <li><b>Mode examen</b> : pour un examen détecté dans ton emploi du temps, plus de créneaux et un compte à rebours sur le tableau de bord.</li>
+          <li><b>Programmer une interro</b> : dans la carte « Examens et interros à venir » du tableau de bord, « ＋ Programmer une interro ou un examen » : choisis la matière, le type, la date et l'heure. Tu peux la modifier (✏️) ou la supprimer (🗑) quand tu veux.</li>
+          <li><b>Mode examen</b> : pour un examen détecté dans ton emploi du temps ou programmé par toi, plus de créneaux et un compte à rebours sur le tableau de bord.</li>
           <li><b>Export calendrier</b> : tes créneaux peuvent être ajoutés à Google Agenda, Apple Calendrier ou Outlook (fichier .ics, onglet Import &amp; sauvegarde).</li>
         </ul>
       </article>
@@ -235,9 +236,23 @@
           <button data-view="notes" class="ml-auto text-sm text-blue-600 hover:underline">Ouvrir mes notes →</button></div>
         <ul id="tasks-list" class="space-y-1"></ul>
       </div>
-      <div id="exam-card" class="hidden bg-white rounded-xl border border-slate-200 p-5">
-        <h2 class="font-semibold mb-3">🎯 Examens à venir</h2>
+      <div id="exam-card" class="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 class="font-semibold mb-3">🎯 Examens et interros à venir</h2>
+        <p id="exam-empty" class="text-sm text-slate-500 hidden">Aucune interro ni aucun examen programmé.</p>
         <ul id="exam-list" class="space-y-2"></ul>
+        <details id="exam-add" class="mt-3">
+          <summary class="text-sm text-slate-600 cursor-pointer">＋ Programmer une interro ou un examen</summary>
+          <form id="exam-form" class="flex flex-wrap gap-2 items-end mt-2 text-sm">
+            <label class="text-xs text-slate-600">Matière<input type="text" name="subject" required maxlength="120" list="exam-subjects" class="block border rounded-lg px-2 py-1.5 text-sm w-36"><datalist id="exam-subjects"></datalist></label>
+            <label class="text-xs text-slate-600">Type<select name="kind" class="block border rounded-lg px-2 py-1.5 text-sm"><option>Interro</option><option>DS</option><option>Examen</option><option>Partiel</option><option>Oral</option></select></label>
+            <label class="text-xs text-slate-600">Date<input type="date" name="from" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">Heure<input type="time" name="start" value="08:00" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
+            <label class="text-xs text-slate-600">Durée<select name="duration" class="block border rounded-lg px-2 py-1.5 text-sm"><option value="30">30 min</option><option value="60">1 h</option><option value="90">1 h 30</option><option value="120" selected>2 h</option><option value="180">3 h</option></select></label>
+            <button type="submit" class="tool tool-primary" id="exam-save">Programmer</button>
+            <button type="button" class="tool hidden" id="exam-cancel">Annuler</button>
+          </form>
+          <p class="text-xs text-slate-500 mt-1">Le planning ajoute des créneaux de révision dans les 14 jours qui précèdent.</p>
+        </details>
       </div>
       <details id="priority-card" class="fold hidden">
         <summary><h2 class="font-semibold">À réviser en priorité</h2><span id="priority-sub" class="text-xs text-slate-500"></span></summary>

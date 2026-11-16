@@ -996,7 +996,7 @@ const aiConfig = () => AI.activeConfig(aiSettings);
 function updateAiStatus(busyText = '') {
   const el = $('#ai-status'), c = aiConfig();
   el.className = 'ai-status' + (busyText ? ' busy' : c.key ? ' ready' : '');
-  el.textContent = busyText || (doc && doc.ai_off ? 'IA désactivée' : c.key ? c.model : 'Clé API à ajouter');
+  el.textContent = busyText || (doc && doc.ai_off ? 'Sans lecture du cours' : c.key ? c.model : 'Clé API à ajouter');
 }
 const T = () => AI.forTopic(doc && doc.topic);
 /** Le texte du cours n'est envoyé à l'IA que si elle est autorisée à le lire : toutes les fonctions d'IA passent par ici. */
@@ -1011,8 +1011,8 @@ function applyAiMode() {
   b.classList.toggle('off', !on); b.setAttribute('aria-pressed', String(on));
   b.innerHTML = on ? '🤖 IA : lit ce cours' : '🔒 IA : ne lit pas';
   b.title = on ? 'Clique pour empêcher l\'IA de lire ce cours (aucun texte ne sera envoyé)' : 'Clique pour autoriser l\'IA à lire ce cours';
-  $('#ai-input').disabled = !on; $('#ai-send').disabled = !on || aiBusy;
-  $('#ai-input').placeholder = on ? 'Pose ta question…' : 'IA désactivée pour ce cours';
+  $('#ai-input').disabled = false; $('#ai-send').disabled = aiBusy;
+  $('#ai-input').placeholder = on ? 'Pose ta question…' : 'Question générale (l\'IA ne voit pas ton cours)…';
   $$('#ai-suggest button, #ai-quick button').forEach(x => { x.disabled = !on; });
   $('#review-quiz').disabled = !on || !aiConfig().key;
   updateAiStatus();
@@ -1069,16 +1069,20 @@ $('#ai-resum').onclick = () => { if (!aiBusy) summarize(); };
 
 async function sendQuestion(text) {
   text = String(text || '').trim();
-  if (!text || aiBusy || !doc || !aiAllowed()) return;
+  if (!text || aiBusy || !doc) return;
+  const general = !aiAllowed();
   const cfg = aiConfig(), token = docToken;
   if (!cfg.key) return openAiSettings();
   aiBusy = true; $('#ai-send').disabled = true; updateAiStatus('Réfléchit…');
-  doc.chat.push({ role: 'user', content: text });
+  doc.chat.push({ role: 'user', content: text, ...(general ? { g: 1 } : {}) });
   renderChat(); typing(true);
   try {
-    const answer = await AI.ask(cfg, { system: aiContext(), messages: doc.chat });
+    // IA coupée : on n'envoie ni le texte du cours ni les anciennes réponses qui le citent, seulement les échanges « généraux »
+    const answer = await AI.ask(cfg, general
+      ? { system: AI.generalPrompt(), messages: doc.chat.filter(m => m.g) }
+      : { system: aiContext(), messages: doc.chat });
     if (token !== docToken) return;
-    doc.chat.push({ role: 'assistant', content: answer });
+    doc.chat.push({ role: 'assistant', content: answer, ...(general ? { g: 1 } : {}) });
     doc.chat = doc.chat.slice(-60);
     await library.update(doc.id, { chat: doc.chat });
     $('#ai-input').value = ''; autosize();

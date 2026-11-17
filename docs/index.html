@@ -159,7 +159,7 @@
           <li><b>Réglages par matière</b> : durée d'une session, durée des séances de TD, nombre de chapitres, intensité. Une matière sur laquelle tu te sens fragile reçoit automatiquement un peu plus de temps.</li>
           <li><b>Créneaux bloqués</b> : indique tes indisponibilités (sport, job…) pour que rien ne soit placé dessus.</li>
           <li><b>Programmer une interro</b> : dans la carte « Examens et interros à venir » du tableau de bord, « ＋ Programmer une interro ou un examen » : choisis la matière, le type, la date et l'heure. Tu peux la modifier (✏️) ou la supprimer (🗑) quand tu veux.</li>
-          <li><b>Ajouter un créneau de révision</b> : dans « À réviser aujourd'hui », « ＋ Ajouter un créneau » : choisis la matière, le jour et la durée, puis une heure parmi celles qui sont libres (jamais pendant un cours, un blocage ou une autre révision). Tu peux le déplacer (« Modifier »), le valider ou le supprimer (🗑) comme les autres.</li>
+          <li><b>Ajouter un créneau de révision</b> : dans « À réviser aujourd'hui », « ＋ Ajouter un créneau » (aussi disponible dans l'Agenda de révision) : choisis la matière (ou « ＋ Nouvelle matière… » si elle n'existe pas encore), le jour et la durée, puis une heure parmi celles qui sont libres (jamais pendant un cours, un blocage ou une autre révision). Tu peux le déplacer (« Modifier »), le valider ou le supprimer (🗑) comme les autres.</li>
           <li><b>Mode examen</b> : pour un examen détecté dans ton emploi du temps ou programmé par toi, plus de créneaux et un compte à rebours sur le tableau de bord.</li>
           <li><b>Export calendrier</b> : tes créneaux peuvent être ajoutés à Google Agenda, Apple Calendrier ou Outlook (fichier .ics, onglet Import &amp; sauvegarde).</li>
         </ul>
@@ -295,6 +295,7 @@
     <section id="view-agenda" class="view hidden">
       <h2 class="font-semibold text-lg mb-1">Agenda de révision</h2>
       <p class="text-xs text-slate-500 mb-4">Attrape une matière et lâche-la sur le jour où tu veux la réviser : à la souris, ou au doigt avec la poignée ⠿. « Modifier » reste disponible pour choisir l'heure.</p>
+      <p class="mb-3"><button type="button" id="extra-open-agenda" class="tool" title="Choisir toi-même un créneau parmi les heures libres, même pour une matière qui n'existe pas encore">＋ Ajouter un créneau de révision</button></p>
       <div id="agenda-late" class="hidden agenda-late"></div>
       <div id="review-card-agenda" class="hidden mb-4"></div>
       <div id="agenda-list" class="space-y-4"></div>
@@ -621,6 +622,7 @@
     <form id="extra-form" class="quiz-body space-y-3 text-sm">
       <div class="flex flex-wrap gap-2 items-end">
         <label class="text-xs text-slate-600">Matière<select name="subject" required class="block border rounded-lg px-2 py-1.5 text-sm"></select></label>
+        <label id="extra-new-wrap" class="text-xs text-slate-600 hidden">Nom de la nouvelle matière<input type="text" name="newsubject" maxlength="120" class="block border rounded-lg px-2 py-1.5 text-sm w-44" placeholder="ex. : Permis, Anglais oral"></label>
         <label class="text-xs text-slate-600">Jour<input type="date" name="day" required class="block border rounded-lg px-2 py-1.5 text-sm"></label>
         <label class="text-xs text-slate-600">Durée<select name="minutes" class="block border rounded-lg px-2 py-1.5 text-sm"><option value="30">30 min</option><option value="45">45 min</option><option value="60" selected>1 h</option><option value="90">1 h 30</option><option value="120">2 h</option></select></label>
       </div>

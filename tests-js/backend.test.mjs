@@ -361,3 +361,15 @@ test('créneau de révision au choix : seulement les heures libres, sans retard 
   await call('DELETE', `/api/extras/${r.id}`);
   assert.ok(!(await agenda(call)).some(s => s.extra));
 });
+
+test('créneau au choix pour une matière qui n\'existe pas : créée seulement si tout est valide', async () => {
+  const { call } = await setup();
+  const day = addDays(TODAY, 2);
+  await rejects(call('POST', '/api/extras', { subject: 'Permis', day, start: '10:00', minutes: 60 }), 404);          // sans « create »
+  await rejects(call('POST', '/api/extras', { subject: 'Permis', create: true, day: 'nimporte', start: '10:00', minutes: 60 }), 400);
+  assert.equal((await call('GET', '/api/subjects')).length, 0);                                                      // rien créé en cas d'erreur
+  const r = await call('POST', '/api/extras', { subject: ' Permis ', create: true, day, start: '10:00', minutes: 60 });
+  assert.ok(r.id > 0);
+  assert.deepEqual((await call('GET', '/api/subjects')).map(s => s.name), ['Permis']);
+  assert.equal((await agenda(call)).find(s => s.extra).subject, 'Permis');
+});

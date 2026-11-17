@@ -375,14 +375,15 @@ export async function createBackend({ store, today = () => todayLocal(), now = (
       return { day, minutes, starts: freeStarts(day, minutes) };
     }
     if (method === 'POST' && p === '/api/extras') {
-      const key = findSubject(body.subject), minutes = Number(body.minutes);
-      if (!key) throw err(404, 'Matière introuvable.');
+      const key = findSubject(body.subject), minutes = Number(body.minutes), name = String(body.subject || '').trim().slice(0, 120);
+      if (!key && !(body.create && name)) throw err(key === undefined && body.create ? 400 : 404, body.create ? 'Donne un nom à cette matière.' : 'Matière introuvable.');
       if (!isDay(body.day)) throw err(400, 'Date invalide.');
       if (!HHMM.test(String(body.start || ''))) throw err(400, 'Heure invalide.');
       if (!Number.isInteger(minutes) || minutes < 5 || minutes > 480) throw err(400, 'La durée doit être comprise entre 5 minutes et 8 h.');
       if (!freeStarts(body.day, minutes).includes(body.start)) throw err(409, 'Ce créneau n\'est plus libre : choisis une autre heure.');
       if (S().extras.length >= 1000) throw err(400, 'Trop de créneaux ajoutés à la main (1000 maximum).');
-      const x = { id: S().next_item_id++, subject: S().subjects[key].name, day: body.day, start: body.start, minutes };
+      if (!key) ensureSubjects([name]);                         // matière qui n'existe pas encore : créée une fois tout validé
+      const x = { id: S().next_item_id++, subject: S().subjects[findSubject(name || key)].name, day: body.day, start: body.start, minutes };
       S().extras.push(x); store.save();
       return { ok: true, id: x.id };
     }

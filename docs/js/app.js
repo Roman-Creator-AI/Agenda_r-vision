@@ -1535,20 +1535,25 @@ async function loadExtraStarts() {
     $$('[data-start]', box).forEach(x => { const on = x === b; x.setAttribute('aria-checked', String(on)); x.classList.toggle('tool-primary', on); });
   });
 }
-$('#extra-open').onclick = guard(async () => {
+const syncExtraSubject = () => { const f = $('#extra-form'), nw = f.subject.value === '__new'; $('#extra-new-wrap').classList.toggle('hidden', !nw); f.newsubject.required = nw; };
+$('#extra-form').subject.onchange = syncExtraSubject;
+const openExtra = guard(async () => {
   const f = $('#extra-form'), subs = await api('/api/subjects');
-  if (!subs.length) return toast('Ajoute d\'abord ton emploi du temps : il n\'y a encore aucune matière.', false);
-  f.subject.innerHTML = subs.map(x => `<option>${esc(x.name)}</option>`).join('');
+  f.subject.innerHTML = subs.map(x => `<option>${esc(x.name)}</option>`).join('') + '<option value="__new">＋ Nouvelle matière…</option>';
+  syncExtraSubject();
   f.day.min = todayIso(); if (!f.day.value || f.day.value < f.day.min) f.day.value = todayIso();
   await loadExtraStarts(); $('#extra-dialog').showModal();
 });
+$('#extra-open').onclick = $('#extra-open-agenda').onclick = openExtra;
 $('#extra-form').day.onchange = $('#extra-form').minutes.onchange = guard(loadExtraStarts);
 $('#extra-form').onsubmit = guard(async e => {
   e.preventDefault(); const f = e.target;
   if (!extraStart) return;
-  try { await api('/api/extras', { method: 'POST', json: { subject: f.subject.value, day: f.day.value, start: extraStart, minutes: Number(f.minutes.value) } }); }
+  const isNew = f.subject.value === '__new', subject = isNew ? f.newsubject.value.trim() : f.subject.value;
+  if (!subject) return toast('Donne un nom à la nouvelle matière.', false);
+  try { await api('/api/extras', { method: 'POST', json: { subject, create: isNew, day: f.day.value, start: extraStart, minutes: Number(f.minutes.value) } }); }
   catch (err) { await loadExtraStarts(); throw err; }
-  $('#extra-dialog').close(); toast(`Créneau ajouté : ${f.subject.value}, ${fmtShort(f.day.value)} à ${extraStart}`); await refresh();
+  $('#extra-dialog').close(); toast(`Créneau ajouté : ${subject}, ${fmtShort(f.day.value)} à ${extraStart}`); await refresh();
 });
 
 const refresh = guard(async () => { await loaders[view](param); refreshStatus(); });

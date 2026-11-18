@@ -1,6 +1,6 @@
 // Service worker : permet d'installer l'appli et de l'ouvrir sans connexion.
 // Stratégie « réseau d'abord » : quand on est en ligne on a toujours la dernière version ; hors ligne, la dernière copie vue.
-const CACHE = 'campass-v1';
+const CACHE = 'campass-v2';   // changer ce numéro force tous les appareils à repartir d'une copie fraîche
 const SHELL = ['./', 'index.html', 'feuille-blanche.html', 'manifest.webmanifest', 'css/tailwind.css', 'css/app.css', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'vendor/ical.min.js',
   'js/ai.js',
@@ -24,7 +24,7 @@ const SHELL = ['./', 'index.html', 'feuille-blanche.html', 'manifest.webmanifest
   'js/stats.js',
   'js/store.js'];
 
-self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {})))).then(() => self.skipWaiting())); });
+self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(new Request(u, { cache: 'reload' })).catch(() => {})))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
@@ -34,7 +34,7 @@ self.addEventListener('fetch', e => {
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     try {
-      const res = await fetch(req);
+      const res = await fetch(req, { cache: 'no-cache' });     // revalide toujours auprès du serveur (le cache HTTP de GitHub Pages dure 10 min)
       if (res.ok) cache.put(req, res.clone());
       return res;
     } catch {
